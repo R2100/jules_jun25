@@ -1,5 +1,5 @@
 // --- CONFIG & GLOBALS ---
-const GAME_VERSION = "1.0.5"; 
+const GAME_VERSION = "1.0.3"; 
 // Basic Three.js setup
 let scene, camera, renderer;
 let gameCanvas;
@@ -20,10 +20,10 @@ const DEBUG_GRIP = true; // Set to false to disable grip logs
 const defaultCameraLookAt = new THREE.Vector3(0, 0, 0);
 
 const circuitWaypoints = [
-    new THREE.Vector3(7, 0.3, 6),    // Near top-right corner (relative to center of 20x20 stage)
-    new THREE.Vector3(-10, 0.3, 4),   // Near top-left corner
-    new THREE.Vector3(-10, 0.3, -14),  // Near bottom-left corner
-    new THREE.Vector3(10, 0.3, -14)    // Near bottom-right corner
+    new THREE.Vector3(8, 0.3, 8),    // Near top-right corner (relative to center of 20x20 stage)
+    new THREE.Vector3(-8, 0.3, 8),   // Near top-left corner
+    new THREE.Vector3(-8, 0.3, -8),  // Near bottom-left corner
+    new THREE.Vector3(8, 0.3, -8)    // Near bottom-right corner
 ];
 
 // --- SCENE & OBJECT CREATION ---
@@ -267,7 +267,7 @@ function init() {
     // Assuming wallHeight is 1.0 as used for boundary walls. If not, use the correct height.
     // The y-position of the wall should be wallHeight / 2.
     const centralWallHeight = 1.0; // Match other walls or define as needed
-    createWall(1, wallHeight, 7, 0xccaa88, new THREE.Vector3(0,  0  , - wallHeight*3 ));
+    createWall(1, centralWallHeight, 15, 0xccaa88, new THREE.Vector3(0,  0  , - wallHeight*3 ));
 
     // Keyboard event listeners
     document.addEventListener('keydown', (event) => {
@@ -307,7 +307,6 @@ function init() {
     for (let i = 0; i < NUM_BOTS; i++) {
         const botColor = Math.random() * 0xffffff; // Random color for bots
         const bot = createBumperCar(botColor);
-		bot.userData.gripFactor = Math.random() * 0.4; // Random bot rip
         bot.name = "bot" + i;
 
         // Position bots (simple initial placement)
@@ -353,18 +352,18 @@ function init() {
             const newGripFactor = parseFloat(gripSlider.value);
             gripValueSpan.textContent = newGripFactor.toFixed(2);
 
-            // Apply the new grip factor to all PLAYER cars
+            // Apply the new grip factor to all cars
             if (car1 && car1.userData) {
                 car1.userData.gripFactor = newGripFactor;
             }
             if (car2 && car2.userData) {
                 car2.userData.gripFactor = newGripFactor;
             }
-           /* botCars.forEach(bot => {
+            botCars.forEach(bot => {
                 if (bot.userData) {
                     bot.userData.gripFactor = newGripFactor;
                 }
-            });*/
+            });
         });
     } else {
         console.warn("Grip factor slider UI elements not found.");
@@ -633,24 +632,22 @@ function updateBotAI(bot, targetIgnored, dt) { // target parameter is now effect
 
     const botForward = new THREE.Vector3(0, 0, 1).applyQuaternion(bot.quaternion);
     
-   if (distanceToTarget > 0.001) { // Only calculate angle if there's a direction
+    if (distanceToTarget > 0.001) { // Only calculate angle if there's a direction
         let angleToTarget = botForward.angleTo(directionToTarget);
         const cross = new THREE.Vector3().crossVectors(botForward, directionToTarget);
         
-        const turnThreshold = 0.15; // Radians, about 8.6 degrees
+        const turnThreshold = 0.1; // Radians, about 5.7 degrees
         if (angleToTarget > turnThreshold) {
-            bot.userData.turnValue = (cross.y > 0 ? 1 : -1) * bot.userData.turnSpeed * 0.8;
+            bot.userData.turnValue = (cross.y > 0 ? 1 : -1) * bot.userData.turnSpeed;
         } else {
             bot.userData.turnValue = 0; // Mostly aligned, stop turning
         }
 
-        // Adjust Acceleration/Speed Logic for Turns
-        if (angleToTarget > Math.PI / 6 && bot.userData.velocity.length() > bot.userData.maxSpeed * 0.5) {
-            bot.userData.accelerationValue = -bot.userData.accelerationRate * 0.5; // Apply brakes
-        } else if (angleToTarget > Math.PI / 4) { // Existing condition, adjusted
-            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.2; // Reduced acceleration
-        } else {
-            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.75; // Default acceleration
+        // Set acceleration to move towards waypoint
+        bot.userData.accelerationValue = bot.userData.accelerationRate * 0.75; 
+        // If bot is not well aligned, reduce speed to make turning easier
+        if (angleToTarget > Math.PI / 3) { // Wider angle for slowing down during turns
+            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.3;
         }
     }
 
@@ -1076,7 +1073,7 @@ function updateCamera(dt) { // Definition was here, confirming its location
         // applyCarPhysics updates position/rotation, but matrixWorld might not be rebuilt yet.
         car1.updateMatrixWorld(true); 
 
-        const cameraOffset = new THREE.Vector3(0, 5, -5.8); // x, y (height from car center), z (distance behind)
+        const cameraOffset = new THREE.Vector3(0, 0.7, -1.8); // x, y (height from car center), z (distance behind)
                                                              // Car body center is at y=0.3. Sphere height is 0.6.
                                                              // So y=0.7 for offset means camera is 0.4 above car's center.
         const lookAtOffset = new THREE.Vector3(0, 0.4, 5.0);  // Point to look at, in front of car, y relative to car center.
