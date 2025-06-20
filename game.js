@@ -17,6 +17,12 @@ let isFirstPersonView = false;
 const defaultCameraPosition = new THREE.Vector3(0, 22, 15);
 const defaultCameraLookAt = new THREE.Vector3(0, 0, 0);
 
+const circuitWaypoints = [
+    new THREE.Vector3(8, 0.3, 8),    // Near top-right corner (relative to center of 20x20 stage)
+    new THREE.Vector3(-8, 0.3, 8),   // Near top-left corner
+    new THREE.Vector3(-8, 0.3, -8),  // Near bottom-left corner
+    new THREE.Vector3(8, 0.3, -8)    // Near bottom-right corner
+];
 
 // --- SCENE & OBJECT CREATION ---
 function createBumperCar(color) {
@@ -31,7 +37,7 @@ function createBumperCar(color) {
 
     // Scale to make it oval: x, y, z scaling factors
     // Longer along local Z (forward), slightly flatter on Y
-    body.scale.set(0.8, 0.6, 1.2);
+    body.scale.set(0.7, 0.6, 1.5); // Narrower (X) and longer (Z)
     body.position.y = 0.3; // Adjust Y position based on new height (0.6 * 0.5 radius = 0.3)
     car.add(body);
 
@@ -56,7 +62,7 @@ function createBumperCar(color) {
     // or use a larger circular torus that encompasses the shape.
     // For simplicity, let's use a circular torus that's wide enough for the Z-axis and tall enough for X.
     // Bumper needs to be larger, e.g., radius 0.65, tube 0.1
-    const bumperGeometry = new THREE.TorusGeometry(0.65, 0.12, 16, 100);
+    const bumperGeometry = new THREE.TorusGeometry(0.8, 0.12, 16, 100); // Increased radius from 0.65 to 0.8
     const bumperMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.4 });
     const bumper = new THREE.Mesh(bumperGeometry, bumperMaterial);
     bumper.rotation.x = Math.PI / 2; // Rotate torus to be flat
@@ -73,7 +79,7 @@ function createBumperCar(color) {
     const marker = new THREE.Mesh(markerGeometry, markerMaterial);
     // Position it at the "front" of the oval (positive Z direction of the scaled sphere body)
     // The sphere's scaled radius in Z is 0.5 * 1.2 = 0.6
-    marker.position.set(0, 0.3, 0.6);
+    marker.position.set(0, 0.3, 0.75); // Position at the new front
     marker.rotation.x = Math.PI / 2; // Point the cone forward along Z
     car.add(marker);
 
@@ -122,41 +128,48 @@ function createBumperCar(color) {
     });
     // No need for the conditional visibility check based on opacity if we always want them visible for now.
 
-    const carBodyDimensions = { w: 0.8, h: 0.6, l: 1.2 }; // Approx. scaled sphere: x=0.8, y=0.6, z=1.2 (body.scale values * sphere diameter 1)
+    const carBodyDimensions = { w: 0.7, h: 0.6, l: 1.5 }; // NEW
+
+    const carBodySphere = car.getObjectByName("carBodySphere"); // Ensure this object is found
+    const carBodyYPos = carBodySphere ? carBodySphere.position.y : 0.3; // Fallback if not found
 
     // Front Zone
-    const frontZoneDepth = 0.3;
-    const frontZoneGeo = new THREE.BoxGeometry(carBodyDimensions.w * 0.9, carBodyDimensions.h * 0.9, frontZoneDepth);
-    const frontZone = new THREE.Mesh(frontZoneGeo, zoneMaterial.clone());
+    const frontZoneDepth = 0.3; // Keep depth
+    // Use 85% of new width & height for zone geo width/height
+    const frontZoneGeo = new THREE.BoxGeometry(carBodyDimensions.w * 0.85, carBodyDimensions.h * 0.85, frontZoneDepth);
+    const frontZone = new THREE.Mesh(frontZoneGeo, zoneMaterial.clone()); // Assuming zoneMaterial is defined
     frontZone.name = "frontZone";
-    const carBodySphere = car.getObjectByName('carBodySphere'); // Get the named body
-    const carBodyYPos = carBodySphere ? carBodySphere.position.y : 0.3; // Fallback if not found, though it should be
-
-    frontZone.position.set(0, carBodyYPos, (carBodyDimensions.l / 2) - (frontZoneDepth / 2) + 0.05); // Shift slightly forward from body front
+    // Recalculate Z position based on new length (1.5 / 2 = 0.75)
+    frontZone.position.set(0, carBodyYPos, (carBodyDimensions.l / 2) - (frontZoneDepth / 2) + 0.05);
     car.add(frontZone);
 
     // Rear Zone
-    const rearZoneDepth = 0.3;
-    const rearZoneGeo = new THREE.BoxGeometry(carBodyDimensions.w * 0.9, carBodyDimensions.h * 0.9, rearZoneDepth);
+    const rearZoneDepth = 0.3; // Keep depth
+    const rearZoneGeo = new THREE.BoxGeometry(carBodyDimensions.w * 0.85, carBodyDimensions.h * 0.85, rearZoneDepth);
     const rearZone = new THREE.Mesh(rearZoneGeo, zoneMaterial.clone());
     rearZone.name = "rearZone";
-    rearZone.position.set(0, carBodyYPos, -(carBodyDimensions.l / 2) + (rearZoneDepth / 2) - 0.05); // Shift slightly backward
+    // Recalculate Z position
+    rearZone.position.set(0, carBodyYPos, -(carBodyDimensions.l / 2) + (rearZoneDepth / 2) - 0.05);
     car.add(rearZone);
 
+    // Side Zones
+    const sideZoneWidth = 0.15; // Adjusted width for narrower car
+    const sideZoneLength = carBodyDimensions.l * 0.75; // Adjusted length coverage
+
     // Left Side Zone
-    const sideZoneWidth = 0.2;
-    const sideZoneLength = carBodyDimensions.l * 0.7; // Shorter than full car length to avoid overlap with front/rear zones
-    const leftZoneGeo = new THREE.BoxGeometry(sideZoneWidth, carBodyDimensions.h * 0.9, sideZoneLength);
+    const leftZoneGeo = new THREE.BoxGeometry(sideZoneWidth, carBodyDimensions.h * 0.85, sideZoneLength);
     const leftZone = new THREE.Mesh(leftZoneGeo, zoneMaterial.clone());
     leftZone.name = "leftSideZone";
-    leftZone.position.set(-(carBodyDimensions.w / 2) + (sideZoneWidth / 2) - 0.05, carBodyYPos, 0);
+    // Recalculate X position (half-width is 0.7/2 = 0.35)
+    leftZone.position.set(-(carBodyDimensions.w / 2) + (sideZoneWidth / 2), carBodyYPos, 0);
     car.add(leftZone);
 
     // Right Side Zone
-    const rightZoneGeo = new THREE.BoxGeometry(sideZoneWidth, carBodyDimensions.h * 0.9, sideZoneLength);
+    const rightZoneGeo = new THREE.BoxGeometry(sideZoneWidth, carBodyDimensions.h * 0.85, sideZoneLength);
     const rightZone = new THREE.Mesh(rightZoneGeo, zoneMaterial.clone());
     rightZone.name = "rightSideZone";
-    rightZone.position.set((carBodyDimensions.w / 2) - (sideZoneWidth / 2) + 0.05, carBodyYPos, 0);
+    // Recalculate X position
+    rightZone.position.set((carBodyDimensions.w / 2) - (sideZoneWidth / 2), carBodyYPos, 0);
     car.add(rightZone);
 
     // Setup OBB for each zone
@@ -297,6 +310,7 @@ function init() {
         // Optionally adjust bot physics properties if different from players
         // bot.userData.maxSpeed = 2.0;
         // bot.userData.accelerationRate = 2.0;
+        bot.userData.currentWaypointIndex = 0; // Add this line for each bot
 
         scene.add(bot);
         botCars.push(bot);
@@ -527,49 +541,57 @@ function animate() {
 
 
 // --- BOT AI ---
-function updateBotAI(bot, target, dt) {
-    if (!bot || !target || dt === 0) return;
+function updateBotAI(bot, targetIgnored, dt) { // target parameter is now effectively ignored
+    if (!bot || dt === 0 || typeof bot.userData.currentWaypointIndex === 'undefined') {
+        // console.warn("Bot AI update skipped for bot:", bot ? bot.name : "undefined bot", "or dt is 0 or waypoint index missing");
+        return;
+    }
 
-    const directionToTarget = new THREE.Vector3().subVectors(target.position, bot.position);
+    const currentTargetPos = circuitWaypoints[bot.userData.currentWaypointIndex];
+    if (!currentTargetPos) {
+        // console.error("Bot AI: currentTargetPos is undefined for bot", bot.name, "index", bot.userData.currentWaypointIndex);
+        return;
+    }
+
+    const directionToTarget = new THREE.Vector3().subVectors(currentTargetPos, bot.position);
     const distanceToTarget = directionToTarget.length();
-    directionToTarget.normalize(); // Important to normalize *after* getting length
+
+    // Normalize AFTER getting length
+    if (distanceToTarget > 0.001) { // Avoid normalizing zero vector
+        directionToTarget.normalize();
+    } else {
+        // Bot is very close or at the target, no specific direction needed, focus on switching waypoint
+        bot.userData.turnValue = 0;
+        bot.userData.accelerationValue = 0; // Stop briefly at waypoint if needed
+        // Waypoint switching logic will handle moving to the next target
+    }
 
     const botForward = new THREE.Vector3(0, 0, 1).applyQuaternion(bot.quaternion);
 
-    // Angle between bot's forward and direction to target
-    let angleToTarget = botForward.angleTo(directionToTarget);
+    if (distanceToTarget > 0.001) { // Only calculate angle if there's a direction
+        let angleToTarget = botForward.angleTo(directionToTarget);
+        const cross = new THREE.Vector3().crossVectors(botForward, directionToTarget);
 
-    // Determine turn direction using cross product
-    const cross = new THREE.Vector3().crossVectors(botForward, directionToTarget);
+        const turnThreshold = 0.1; // Radians, about 5.7 degrees
+        if (angleToTarget > turnThreshold) {
+            bot.userData.turnValue = (cross.y > 0 ? 1 : -1) * bot.userData.turnSpeed;
+        } else {
+            bot.userData.turnValue = 0; // Mostly aligned, stop turning
+        }
 
-    // Decide on turning
-    const turnThreshold = 0.1; // Radians, about 5.7 degrees
-    if (angleToTarget > turnThreshold) {
-        bot.userData.turnValue = (cross.y > 0 ? 1 : -1) * bot.userData.turnSpeed;
-    } else {
-        bot.userData.turnValue = 0; // Mostly aligned, stop turning
+        // Set acceleration to move towards waypoint
+        bot.userData.accelerationValue = bot.userData.accelerationRate * 0.75;
+        // If bot is not well aligned, reduce speed to make turning easier
+        if (angleToTarget > Math.PI / 3) { // Wider angle for slowing down during turns
+            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.3;
+        }
     }
 
-    // Decide on acceleration
-    const chaseDistance = 7.0;
-    const attackDistance = 3.0; // Distance at which bot tries to ram
-    const tooCloseDistance = 1.5;
-
-    if (angleToTarget > Math.PI / 2) { // If target is behind or far to the side
-        bot.userData.accelerationValue = bot.userData.accelerationRate * 0.3; // Slow down to turn
-    } else if (distanceToTarget > chaseDistance) {
-        bot.userData.accelerationValue = bot.userData.accelerationRate; // Chase full speed
-    } else if (distanceToTarget > attackDistance) {
-        bot.userData.accelerationValue = bot.userData.accelerationRate * 0.6; // Approach
-    } else if (distanceToTarget > tooCloseDistance) {
-         // If reasonably aligned, try to ram
-        if (angleToTarget < Math.PI / 4) {
-             bot.userData.accelerationValue = bot.userData.accelerationRate;
-        } else { // Not aligned well, slow down to adjust
-             bot.userData.accelerationValue = bot.userData.accelerationRate * 0.2;
-        }
-    } else { // Too close
-        bot.userData.accelerationValue = -bot.userData.accelerationRate * 0.5; // Back up or brake
+    // Waypoint switching logic
+    const waypointReachedThreshold = 2.5; // How close to get before switching
+    if (distanceToTarget < waypointReachedThreshold) {
+        bot.userData.currentWaypointIndex = (bot.userData.currentWaypointIndex + 1) % circuitWaypoints.length;
+        // console.log(`${bot.name} reached waypoint, next is ${circuitWaypoints[bot.userData.currentWaypointIndex].toArray().join(',')}`);
     }
 }
 
