@@ -849,9 +849,25 @@ function handleCarWallCollision(car, wall) {
         car.userData.velocity.y = 0;
     }
 
-    // --- Positional Correction ---
-    const pushOutDistance = 0.05;
-    car.position.addScaledVector(collisionNormal, pushOutDistance);
+    // --- New Positional Correction using Overlap ---
+    const carVertices = getOBBVertices(car.userData.obb);
+    const wallVertices = getOBBVertices(wall.userData.obb);
+
+    const projCar = projectOntoAxis(carVertices, collisionNormal);
+    const projWall = projectOntoAxis(wallVertices, collisionNormal);
+
+    // CollisionNormal points from wall towards the car.
+    // projWall.max is the wall's surface that the car is hitting.
+    // projCar.min is the car's surface that is penetrating the wall.
+    // If projCar.min < projWall.max, there's penetration.
+    const overlap = projWall.max - projCar.min;
+
+    const epsilon = 0.0001; // To avoid jitter or correct only significant overlaps
+    const buffer = 0.01;    // Small buffer to push slightly beyond the surface
+
+    if (overlap > epsilon) {
+        car.position.addScaledVector(collisionNormal, overlap + buffer);
+    }
 
     if (typeof car.userData.score !== 'undefined') {
         car.userData.score -= 1; // Penalty for hitting a wall
