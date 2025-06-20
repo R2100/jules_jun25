@@ -15,6 +15,7 @@ const walls = [];
 // Camera state variables & defaults
 let isFirstPersonView = false;
 const defaultCameraPosition = new THREE.Vector3(0, 15, 8);
+const DEBUG_GRIP = true; // Set to false to disable grip logs
 const defaultCameraLookAt = new THREE.Vector3(0, 0, 0);
 
 const circuitWaypoints = [
@@ -115,11 +116,6 @@ function createBumperCar(color) {
     car.userData.obb.box = localBox; // This box is in the car's local coordinate system
     car.userData.obb.matrix = new THREE.Matrix4(); // This will store the world matrix
 
-    car.userData.velocity = new THREE.Vector3(0, 0, 0);
-    car.userData.accelerationValue = 0; // Renamed from 'acceleration' to avoid conflict with a potential vector
-    car.userData.accelerationRate = 3.0; // m/s^2
-    car.userData.linearDamping = 1.5; // How quickly it slows down. Higher = quicker stop.
-    car.userData.turnValue = 0;      // Renamed from 'turnRate'
     // Collision Zones Setup
     const zoneMaterial = new THREE.MeshStandardMaterial({
         color: 0x00ff00, // Keep a distinct color like green for zones
@@ -433,18 +429,22 @@ function applyCarPhysics(car, dt) {
     const localForward = new THREE.Vector3(0, 0, 1);
     const worldForward = localForward.applyQuaternion(car.quaternion);
 
-    // Acceleration
+    // Log state before grip application
+    if (DEBUG_GRIP) console.log(`[${car.name || 'UnknownCar'}] BEFORE GRIP: gripFactor=${car.userData.gripFactor !== undefined ? car.userData.gripFactor.toFixed(2) : 'N/A'}, vel=(${car.userData.velocity.x.toFixed(2)}, ${car.userData.velocity.z.toFixed(2)}), speed=${car.userData.velocity.length().toFixed(2)}`);
+
     // --- NEW GRIP LOGIC START ---
     if (typeof car.userData.gripFactor !== 'undefined' && car.userData.velocity.lengthSq() > 0.0001) { // Only apply if car is moving
         const currentSpeed = car.userData.velocity.length();
         const targetVelocityAlignedWithCar = worldForward.clone().multiplyScalar(currentSpeed);
 
-        // The lerpAlpha is directly car.userData.gripFactor (0.05 to 1.0)
-        // This means it corrects by that percentage towards the target velocity each frame.
-        // This is a per-frame adjustment, so its "feel" will vary slightly with frame rate.
-        // For more consistent rate of alignment across frame rates, alpha would be 1 - Math.pow(1 - gripPerSec, dt)
-        // But for a user-tuned slider, direct percentage per frame is often more intuitive to tune.
-        car.userData.velocity.lerp(targetVelocityAlignedWithCar, car.userData.gripFactor);
+        if (DEBUG_GRIP) console.log(`[${car.name || 'UnknownCar'}] GRIP TARGET: targetVel=(${targetVelocityAlignedWithCar.x.toFixed(2)}, ${targetVelocityAlignedWithCar.z.toFixed(2)}), carForward=(${worldForward.x.toFixed(2)}, ${worldForward.z.toFixed(2)}), currentSpeed=${currentSpeed.toFixed(2)}`);
+
+        const GRIP_APPLICATION_RATE = 15; // Tune this scalar: higher = faster alignment at given gripFactor from slider
+        const lerpAlpha = Math.min(1.0, car.userData.gripFactor * GRIP_APPLICATION_RATE * dt);
+
+        car.userData.velocity.lerp(targetVelocityAlignedWithCar, lerpAlpha);
+
+        if (DEBUG_GRIP) console.log(`[${car.name || 'UnknownCar'}] AFTER GRIP LERP: newVel=(${car.userData.velocity.x.toFixed(2)}, ${car.userData.velocity.z.toFixed(2)}), lerpAlpha=${lerpAlpha.toFixed(2)}`);
     }
     // --- NEW GRIP LOGIC END ---
 
