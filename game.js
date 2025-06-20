@@ -14,7 +14,7 @@ const walls = [];
 
 // Camera state variables & defaults
 let isFirstPersonView = false;
-const defaultCameraPosition = new THREE.Vector3(0, 5, 10);
+const defaultCameraPosition = new THREE.Vector3(0, 25, 18);
 const defaultCameraLookAt = new THREE.Vector3(0, 0, 0);
 
 
@@ -40,7 +40,7 @@ function createBumperCar(color) {
     car.userData.accelerationValue = 0;
     car.userData.accelerationRate = 3.0;
     car.userData.linearDamping = 1.5;
-    car.userData.maxSpeed = 3.0;
+    car.userData.maxSpeed = 20.0;    // m/s
     car.userData.turnValue = 0;
     car.userData.turnSpeed = 2.0;
     car.userData.score = 0;
@@ -205,7 +205,8 @@ function init() {
 
     // Camera
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    // camera.position.z = 5; // Will be set later
+    camera.position.copy(defaultCameraPosition); // Use the new default
+    camera.lookAt(defaultCameraLookAt);       // Use the default lookAt
 
     // Renderer
     renderer = new THREE.WebGLRenderer({ canvas: gameCanvas });
@@ -282,9 +283,9 @@ function init() {
         car2.name = "Player 2";
     }
 
-    // Adjust camera position to see the cars
-    camera.position.set(0, 5, 10); // x, y, z
-    camera.lookAt(scene.position); // Look at the center of the scene
+    // Adjust camera position to see the cars - This is now handled by camera.position.copy(defaultCameraPosition) above
+    // camera.position.set(0, 5, 10); // x, y, z
+    // camera.lookAt(scene.position); // Look at the center of the scene - Handled by camera.lookAt(defaultCameraLookAt)
 
     for (let i = 0; i < NUM_BOTS; i++) {
         const botColor = Math.random() * 0xffffff; // Random color for bots
@@ -826,18 +827,31 @@ function updateScoreDisplay() {
 function handleCarWallCollision(car, wall) {
     if (!car.userData.velocity) return;
 
-    // --- Determine Collision Normal (simplified for axis-aligned walls) ---
-    let approxNormal = new THREE.Vector3().subVectors(car.position, wall.position);
+    // --- Determine Collision Normal (Robust for axis-aligned static walls) ---
+    const carPos = car.position.clone();
+    const wallPos = wall.position.clone(); // Wall's center
 
-    const wallX = new THREE.Vector3().setFromMatrixColumn(wall.matrixWorld, 0);
-    const wallZ = new THREE.Vector3().setFromMatrixColumn(wall.matrixWorld, 2);
+    // Wall's local half-dimensions (assuming OBB box is centered at origin of wall object)
+    const wallHalfWidth = wall.userData.obb.box.max.x;  // Local half-width along its X-axis
+    const wallHalfDepth = wall.userData.obb.box.max.z;  // Local half-depth along its Z-axis
 
-    let collisionNormal;
-    if (Math.abs(wallX.dot(approxNormal)) > Math.abs(wallZ.dot(approxNormal))) {
-        collisionNormal = wallX.normalize().multiplyScalar(Math.sign(wallX.dot(approxNormal)));
-    } else {
-        collisionNormal = wallZ.normalize().multiplyScalar(Math.sign(wallZ.dot(approxNormal)));
+    // Vector from wall center to car center, in world space
+    const relativePosWorld = new THREE.Vector3().subVectors(carPos, wallPos);
+
+    let collisionNormal = new THREE.Vector3();
+
+    const penetrationX = Math.abs(relativePosWorld.x) / wallHalfWidth;
+    const penetrationZ = Math.abs(relativePosWorld.z) / wallHalfDepth;
+
+    if (penetrationX > penetrationZ) { // Collision is primarily on an X-face
+        collisionNormal.set(Math.sign(relativePosWorld.x), 0, 0);
+    } else { // Collision is primarily on a Z-face
+        collisionNormal.set(0, 0, Math.sign(relativePosWorld.z));
     }
+    // This normal now points from the wall center towards the car, aligned with a world axis.
+    // This IS the outward-pointing normal of the wall face that was hit.
+
+    // --- End of new Collision Normal calculation ---
 
     // --- Reflect Velocity ---
     const restitution = 0.4; // Less bouncy than car-car
