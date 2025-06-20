@@ -9,12 +9,12 @@ const keysPressed = {};
 let deltaTime = 0;
 let lastTime = performance.now();
 const botCars = [];
-const NUM_BOTS = 2;
+const NUM_BOTS = 10;
 const walls = [];
 
 // Camera state variables & defaults
 let isFirstPersonView = false;
-const defaultCameraPosition = new THREE.Vector3(0, 22, 15);
+const defaultCameraPosition = new THREE.Vector3(0, 15, 8);
 const defaultCameraLookAt = new THREE.Vector3(0, 0, 0);
 
 const circuitWaypoints = [
@@ -264,6 +264,13 @@ function init() {
     // Right wall (+x direction)
     createWall(wallThickness, wallHeight, 20 + wallThickness, wallColor, new THREE.Vector3(10 + wallThickness / 2, wallHeight / 2, 0));
 
+    // Add Central Vertical Wall
+    // Parameters: width, height, depth, color, position
+    // Assuming wallHeight is 1.0 as used for boundary walls. If not, use the correct height.
+    // The y-position of the wall should be wallHeight / 2.
+    const centralWallHeight = 1.0; // Match other walls or define as needed
+    createWall(0.5, centralWallHeight, 10.0, 0xccaa88, new THREE.Vector3(0, centralWallHeight / 2, 0));
+
     // Keyboard event listeners
     document.addEventListener('keydown', (event) => {
         keysPressed[event.key.toLowerCase()] = true;
@@ -305,12 +312,25 @@ function init() {
         bot.name = "bot" + i;
 
         // Position bots (simple initial placement)
-        bot.position.set(Math.random() * 10 - 5, 0.3, Math.random() * 10 - 5);
+        bot.position.set((Math.random() * 18) - 9, 0.3, (Math.random() * 18) - 9); // Random X, Z between -9 and 9
 
-        // Optionally adjust bot physics properties if different from players
-        // bot.userData.maxSpeed = 2.0;
-        // bot.userData.accelerationRate = 2.0;
-        bot.userData.currentWaypointIndex = 0; // Add this line for each bot
+        bot.userData.currentWaypointIndex = 0;
+
+        // Varied speeds for bots
+        const baseMaxSpeed = bot.userData.maxSpeed; // Get base value set by createBumperCar
+        const baseTurnSpeed = bot.userData.turnSpeed; // Get base value
+
+        const speedVariationFactor = (Math.random() * 0.4) - 0.2; // Random factor between -0.2 and +0.2
+        const turnVariationFactor = (Math.random() * 0.4) - 0.2;  // Random factor between -0.2 and +0.2
+
+        // Apply variation, ensuring it's not less than 50% of base or some reasonable minimum.
+        bot.userData.maxSpeed = Math.max(baseMaxSpeed * 0.5, baseMaxSpeed * (1 + speedVariationFactor));
+        bot.userData.turnSpeed = Math.max(baseTurnSpeed * 0.5, baseTurnSpeed * (1 + turnVariationFactor));
+
+        // Optional: log the varied speeds for one bot to check
+        // if (i === 0) {
+        //     console.log(`Bot 0 varied speeds: maxSpeed = ${bot.userData.maxSpeed}, turnSpeed = ${bot.userData.turnSpeed}`);
+        // }
 
         scene.add(bot);
         botCars.push(bot);
