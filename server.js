@@ -112,7 +112,7 @@ function updateBotAI(bot, dt) {
     if (distanceToTarget > 0.001) {
         // Angle to target
         let angleToTarget = Math.atan2(directionToTarget.x, directionToTarget.z) - Math.atan2(botForward.x, botForward.z);
-
+        
         // Normalize angle to be between -PI and PI
         while (angleToTarget > Math.PI) angleToTarget -= 2 * Math.PI;
         while (angleToTarget < -Math.PI) angleToTarget += 2 * Math.PI;
@@ -123,7 +123,7 @@ function updateBotAI(bot, dt) {
         } else {
             bot.turnValue = 0; // Mostly aligned
         }
-
+        
         // Speed control
         if (Math.abs(angleToTarget) > Math.PI / 6 && Math.sqrt(bot.velocity.x**2 + bot.velocity.z**2) > bot.maxSpeed * 0.5) {
              bot.accelerationValue = -bot.accelerationRate * 0.5; // Brake if turning sharply at speed
@@ -177,7 +177,7 @@ function applyCarPhysics(car, dt) {
         // For now, we'll just slightly dampen velocity changes when not accelerating hard.
         // This is NOT a correct grip model but a temporary simplification.
         const perpendicularVelocityDamp = 1.0 - (1.0 - car.gripFactor) * 0.5; // Partial damping
-
+        
         // Decompose velocity into components along and perpendicular to car's orientation
         const speed = Math.sqrt(car.velocity.x * car.velocity.x + car.velocity.z * car.velocity.z);
         if (speed > 0.001) {
@@ -213,7 +213,7 @@ function applyCarPhysics(car, dt) {
         car.velocity.x = (car.velocity.x / currentSpeed) * car.maxSpeed;
         car.velocity.z = (car.velocity.z / currentSpeed) * car.maxSpeed;
     }
-
+    
     // Stop if very slow
     if (currentSpeedSq < 0.001 * 0.001) { // Comparing to squared small speed
         car.velocity.x = 0;
@@ -246,7 +246,7 @@ io.on('connection', (socket) => {
   // Handle player join request
   socket.on('playerJoinRequest', (data) => {
     console.log(`Player join request from ${socket.id} with name: ${data.name}`);
-
+    
     const newPlayer = createServerCar(data.name, socket.id, false); // false for isBot
     players[socket.id] = newPlayer;
 
@@ -259,7 +259,7 @@ io.on('connection', (socket) => {
 
     // Broadcast to other clients that a new player has joined (only player data, not full state)
     socket.broadcast.emit('playerJoined', newPlayer);
-
+    
     console.log('Current players:', players);
     console.log('Current bots:', Object.keys(serverBots).length);
   });
@@ -328,7 +328,7 @@ function gameLoop() {
             }
         }
     }
-
+    
     // TODO: Broadcast game state (Step 8) - will include players and serverBots
     const currentGameState = {
         players: {},
@@ -345,7 +345,7 @@ function gameLoop() {
             z: player.z,
             rotationY: player.rotationY,
             score: player.score,
-            isHit: player.isHit
+            isHit: player.isHit 
             // velocity can be sent for client-side prediction if needed, but start simple
         };
     }
@@ -405,7 +405,7 @@ function handleCarWallCollision(car, wall) {
 
     const overlapX = (car.obb.halfSize.x + wall.halfSize.x) - Math.abs(car.x - wall.x);
     const overlapZ = (car.obb.halfSize.z + wall.halfSize.z) - Math.abs(car.z - wall.z);
-
+    
     const restitution = 0.1; // Low bounciness from walls
 
     // Determine primary collision axis (simplistic: axis with smallest overlap for push-out, but for reflection, it's more complex)
@@ -423,13 +423,13 @@ function handleCarWallCollision(car, wall) {
         // Positional correction
         car.z += (car.z > wall.z ? overlapZ : -overlapZ) * 0.5; // Push out
     }
-
+    
     // Dampen overall velocity slightly
     car.velocity.x *= 0.8;
     car.velocity.z *= 0.8;
 
-    if (!car.isBot) {
-        car.score = Math.max(0, car.score - 1);
+    if (!car.isBot) { 
+        car.score = Math.max(0, car.score - 1); 
     }
     car.isHit = true;
     car.hitTimer = 0.25; // seconds
@@ -461,7 +461,7 @@ function handleCollision(car1, car2) { // Car-car (Simplified)
     car1.velocity.z -= impulse * normalZ;
     car2.velocity.x += impulse * normalX;
     car.velocity.z += impulse * normalZ;
-
+    
     // Basic scoring: if one car is significantly faster, it's the attacker
     const speed1 = Math.sqrt(car1.velocity.x**2 + car1.velocity.z**2);
     const speed2 = Math.sqrt(car2.velocity.x**2 + car2.velocity.z**2);
@@ -476,7 +476,7 @@ function handleCollision(car1, car2) { // Car-car (Simplified)
         if (!car1.isBot) car1.score = Math.max(0, car1.score - 1);
         if (!car2.isBot) car2.score = Math.max(0, car2.score - 1);
     }
-
+    
     car1.isHit = true;
     car1.hitTimer = 0.25;
     car2.isHit = true;
