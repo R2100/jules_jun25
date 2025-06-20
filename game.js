@@ -1,4 +1,5 @@
 // --- CONFIG & GLOBALS ---
+const GAME_VERSION = "1.0.0";
 // Basic Three.js setup
 let scene, camera, renderer;
 let gameCanvas;
@@ -367,6 +368,13 @@ function init() {
     } else {
         console.warn("Grip factor slider UI elements not found.");
     }
+
+    const versionSpan = document.getElementById('gameVersionSpan');
+    if (versionSpan) {
+        versionSpan.textContent = GAME_VERSION;
+    } else {
+        console.warn("Version display span ('gameVersionSpan') not found in HTML.");
+    }
 }
 
 function onWindowResize() {
@@ -439,8 +447,7 @@ function applyCarPhysics(car, dt) {
 
         if (DEBUG_GRIP) console.log(`[${car.name || 'UnknownCar'}] GRIP TARGET: targetVel=(${targetVelocityAlignedWithCar.x.toFixed(2)}, ${targetVelocityAlignedWithCar.z.toFixed(2)}), carForward=(${worldForward.x.toFixed(2)}, ${worldForward.z.toFixed(2)}), currentSpeed=${currentSpeed.toFixed(2)}`);
 
-        const GRIP_APPLICATION_RATE = 15; // Tune this scalar: higher = faster alignment at given gripFactor from slider
-        const lerpAlpha = Math.min(1.0, car.userData.gripFactor * GRIP_APPLICATION_RATE * dt);
+        const lerpAlpha = car.userData.gripFactor; // Changed line
 
         car.userData.velocity.lerp(targetVelocityAlignedWithCar, lerpAlpha);
 
