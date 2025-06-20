@@ -14,6 +14,15 @@
         <!-- Bot scores will be dynamically added if NUM_BOTS > 0 -->
     </div>
     <button id="toggleCameraBtn" style="position: absolute; top: 100px; left: 10px; z-index: 10; padding: 8px; background-color: #333; color: white; border: none; border-radius: 3px; cursor: pointer;">Toggle Camera</button>
+
+    <div id="controls" style="position: absolute; bottom: 10px; left: 10px; background-color: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; font-family: Arial, sans-serif; color: white; z-index: 10;">
+        <div>
+            <label for="gripSlider" style="margin-right: 5px;">Grip Factor:</label>
+            <input type="range" id="gripSlider" min="0.05" max="1.0" value="0.1" step="0.01" style="vertical-align: middle;">
+            <span id="gripValue" style="margin-left: 5px; min-width: 30px; display: inline-block;">0.10</span>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="game.js"></script>
 </body>

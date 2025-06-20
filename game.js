@@ -53,6 +53,7 @@ function createBumperCar(color) {
     car.userData.isHit = false;
     car.userData.hitTimer = 0;
     car.userData.originalColor = null;
+    car.userData.gripFactor = 0.1; // Initial low grip (more drift)
 
     // Bumper (torus) - adjust to fit the oval shape
     // TorusGeometry(radius, tube, radialSegments, tubularSegments)
@@ -341,6 +342,35 @@ function init() {
 
     // Start the animation loop
     animate();
+
+    // --- Grip Factor Slider Logic ---
+    const gripSlider = document.getElementById('gripSlider');
+    const gripValueSpan = document.getElementById('gripValue');
+
+    if (gripSlider && gripValueSpan) {
+        // Set initial display value based on slider's default (which matches car's initial gripFactor)
+        gripValueSpan.textContent = parseFloat(gripSlider.value).toFixed(2);
+
+        gripSlider.addEventListener('input', () => {
+            const newGripFactor = parseFloat(gripSlider.value);
+            gripValueSpan.textContent = newGripFactor.toFixed(2);
+
+            // Apply the new grip factor to all cars
+            if (car1 && car1.userData) {
+                car1.userData.gripFactor = newGripFactor;
+            }
+            if (car2 && car2.userData) {
+                car2.userData.gripFactor = newGripFactor;
+            }
+            botCars.forEach(bot => {
+                if (bot.userData) {
+                    bot.userData.gripFactor = newGripFactor;
+                }
+            });
+        });
+    } else {
+        console.warn("Grip factor slider UI elements not found.");
+    }
 }
 
 function onWindowResize() {
@@ -404,10 +434,26 @@ function applyCarPhysics(car, dt) {
     const worldForward = localForward.applyQuaternion(car.quaternion);
 
     // Acceleration
-    const effectiveAcceleration = worldForward.multiplyScalar(car.userData.accelerationValue);
-    car.userData.velocity.addScaledVector(effectiveAcceleration, dt);
+    // --- NEW GRIP LOGIC START ---
+    if (typeof car.userData.gripFactor !== 'undefined' && car.userData.velocity.lengthSq() > 0.0001) { // Only apply if car is moving
+        const currentSpeed = car.userData.velocity.length();
+        const targetVelocityAlignedWithCar = worldForward.clone().multiplyScalar(currentSpeed);
 
-    car.userData.velocity.y = 0; // Ensure no vertical velocity accumulation
+        // The lerpAlpha is directly car.userData.gripFactor (0.05 to 1.0)
+        // This means it corrects by that percentage towards the target velocity each frame.
+        // This is a per-frame adjustment, so its "feel" will vary slightly with frame rate.
+        // For more consistent rate of alignment across frame rates, alpha would be 1 - Math.pow(1 - gripPerSec, dt)
+        // But for a user-tuned slider, direct percentage per frame is often more intuitive to tune.
+        car.userData.velocity.lerp(targetVelocityAlignedWithCar, car.userData.gripFactor);
+    }
+    // --- NEW GRIP LOGIC END ---
+
+    car.userData.velocity.y = 0; // Ensure no vertical velocity accumulation (already existed, ensure it's after grip)
+
+    // Acceleration (based on input)
+    // Note: 'worldForward' here is the car's current orientation, which is correct for applying thrust.
+    const effectiveAcceleration = worldForward.clone().multiplyScalar(car.userData.accelerationValue);
+    car.userData.velocity.addScaledVector(effectiveAcceleration, dt);
 
     // Linear Damping (Friction)
     if (Math.abs(car.userData.accelerationValue) < 0.01) { // Only apply damping if not actively accelerating/braking
