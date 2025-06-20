@@ -8,6 +8,11 @@
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
+    <div id="scoreboard" style="position: absolute; top: 10px; left: 10px; color: #fff; background-color: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-family: Arial, sans-serif; z-index: 10;">
+        <div id="scoreCar1">Player 1: 0</div>
+        <div id="scoreCar2">Player 2: 0</div>
+        <!-- Bot scores will be dynamically added if NUM_BOTS > 0 -->
+    </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="game.js"></script>
 </body>
