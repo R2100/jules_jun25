@@ -16,44 +16,101 @@ socket.on('disconnect', () => {
   console.log('Disconnected from Socket.io server.');
   // Optionally, clear gameEntities or show a disconnected message
   gameEntities = {};
-  // scene.clear(); // Or handle more gracefully
+  if(scene) { // Check if scene exists before clearing
+    // Remove all entities from the scene
+    for (const id in gameEntities) {
+        if (gameEntities.hasOwnProperty(id) && gameEntities[id].isMesh) { // Check if it's a Three.js object
+            scene.remove(gameEntities[id]);
+        }
+    }
+  }
+  gameEntities = {}; // Reset local store
+  myPlayerId = null;
+  // Potentially show a "disconnected" UI element
 });
+
+function processGameState(gameStateData) {
+    const allServerEntities = { ...gameStateData.players, ...gameStateData.bots };
+    const serverEntityIds = new Set();
+
+    for (const entityId in allServerEntities) {
+        serverEntityIds.add(entityId);
+        const entityState = allServerEntities[entityId];
+        let localEntity = gameEntities[entityId];
+
+        if (!localEntity) { // Entity doesn't exist locally, create it
+            console.log('New entity from game state:', entityState.name, entityId);
+            let color = 0x00ff00; // Default green for new entities not immediately classified
+            if (gameStateData.players[entityId]) { // It's a player
+                color = (entityId === myPlayerId) ? 0xff0000 : 0x0000ff; // Red for self, blue for other players
+            } else if (gameStateData.bots[entityId]) { // It's a bot
+                color = 0xffff00; // Yellow for bots
+            }
+
+            localEntity = createBumperCar(color);
+            localEntity.name = entityState.name;
+            if(scene) scene.add(localEntity); else console.error("Scene not ready for new entity:", entityState.name);
+            gameEntities[entityId] = localEntity;
+
+            if (entityId === myPlayerId) {
+                car1 = localEntity; // Assign the main player car reference
+            }
+        }
+
+        // Update entity state
+        if(localEntity) { // Ensure localEntity was created successfully
+            localEntity.position.set(entityState.x, entityState.y, entityState.z);
+            localEntity.rotation.y = entityState.rotationY; // Ensure this is just the Y-axis rotation scalar
+
+            if (localEntity.userData) {
+                localEntity.userData.score = entityState.score;
+                // Check if isHit state changed from false to true to trigger the effect
+                if (entityState.isHit && !localEntity.userData.isHitTriggered) {
+                    triggerHitEffect(localEntity);
+                    localEntity.userData.isHitTriggered = true; // Mark that we've started the visual effect
+                } else if (!entityState.isHit) {
+                    localEntity.userData.isHitTriggered = false; // Reset if server says not hit anymore
+                }
+                // The actual 'isHit' for visuals is managed by triggerHitEffect's internal timer
+            } else {
+                console.warn('Local entity missing userData:', entityId);
+            }
+        }
+    }
+
+    // Identify and remove old entities not present in the current server state
+    for (const localId in gameEntities) {
+        if (!serverEntityIds.has(localId)) {
+            console.log('Removing stale entity:', localId, gameEntities[localId].name);
+            if(scene) scene.remove(gameEntities[localId]);
+            delete gameEntities[localId];
+        }
+    }
+    updateScoreDisplay();
+}
+
 
 socket.on('joinSuccess', (data) => {
     myPlayerId = data.playerId;
     console.log('Successfully joined game! My player ID is:', myPlayerId);
-    console.log('Initial players data:', data.initialPlayers);
+    console.log('Initial game state received:', data.initialGameState);
+    if(scene) { // Ensure scene is ready
+        processGameState(data.initialGameState);
+    } else {
+        // If scene is not ready, queue the initial state or wait.
+        // For now, log an error. This implies initializeGameScene might not have completed.
+        console.error("Scene not initialized at joinSuccess. State processing might be incomplete.");
+        // A robust solution might involve a flag or a queue.
+    }
+    // car1 should be set within processGameState if myPlayerId matches an entity.
+});
 
-    for (const playerId in data.initialPlayers) {
-        if (data.initialPlayers.hasOwnProperty(playerId)) {
-            const playerData = data.initialPlayers[playerId];
-            if (!gameEntities[playerId]) {
-                const color = playerId === myPlayerId ? 0xff0000 : 0x0000ff; // Red for self, blue for others
-                gameEntities[playerId] = createBumperCar(color);
-                gameEntities[playerId].position.set(playerData.x, playerData.y, playerData.z);
-                if (playerData.rotationY) gameEntities[playerId].rotation.y = playerData.rotationY;
-                else gameEntities[playerId].rotation.y = 0; // Ensure rotation is initialized
-                gameEntities[playerId].name = playerData.name;
-                gameEntities[playerId].userData.score = playerData.score || 0; // Ensure score is initialized
-                if (scene) { // Ensure scene is initialized before adding
-                    scene.add(gameEntities[playerId]);
-                    console.log('Added initial player to scene:', playerData.name, 'at', gameEntities[playerId].position);
-                } else {
-                    console.error("Scene not initialized when trying to add initial player:", playerData.name);
-                }
-            }
-        }
+socket.on('gameStateUpdate', (currentGameState) => {
+    if (!myPlayerId || !scene) { // Don't process updates if not fully initialized
+        // console.log("gameStateUpdate received, but client not ready.");
+        return;
     }
-    // If the main player's car (car1) was created before joinSuccess, remove it or reassign.
-    // For simplicity with the new flow, car1 will be gameEntities[myPlayerId]
-    if (car1 && car1.id !== myPlayerId) { // If car1 was a placeholder and not the actual player car
-        if (scene) scene.remove(car1);
-        car1 = null;
-    }
-    if (gameEntities[myPlayerId]) {
-        car1 = gameEntities[myPlayerId]; // Assign car1 to be the player's car from gameEntities
-    }
-    updateScoreDisplay(); // Update scores with initial data
+    processGameState(currentGameState);
 });
 
 socket.on('playerJoined', (playerData) => {
