@@ -1,5 +1,5 @@
 // --- CONFIG & GLOBALS ---
-const GAME_VERSION = "1.0.3"; 
+const GAME_VERSION = "1.0.4";
 // Basic Three.js setup
 let scene, camera, renderer;
 let gameCanvas;
@@ -636,18 +636,20 @@ function updateBotAI(bot, targetIgnored, dt) { // target parameter is now effect
         let angleToTarget = botForward.angleTo(directionToTarget);
         const cross = new THREE.Vector3().crossVectors(botForward, directionToTarget);
         
-        const turnThreshold = 0.1; // Radians, about 5.7 degrees
+        const turnThreshold = 0.15; // Radians, about 8.6 degrees
         if (angleToTarget > turnThreshold) {
-            bot.userData.turnValue = (cross.y > 0 ? 1 : -1) * bot.userData.turnSpeed;
+            bot.userData.turnValue = (cross.y > 0 ? 1 : -1) * bot.userData.turnSpeed * 0.8;
         } else {
             bot.userData.turnValue = 0; // Mostly aligned, stop turning
         }
 
-        // Set acceleration to move towards waypoint
-        bot.userData.accelerationValue = bot.userData.accelerationRate * 0.75; 
-        // If bot is not well aligned, reduce speed to make turning easier
-        if (angleToTarget > Math.PI / 3) { // Wider angle for slowing down during turns
-            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.3;
+        // Adjust Acceleration/Speed Logic for Turns
+        if (angleToTarget > Math.PI / 6 && bot.userData.velocity.length() > bot.userData.maxSpeed * 0.5) {
+            bot.userData.accelerationValue = -bot.userData.accelerationRate * 0.5; // Apply brakes
+        } else if (angleToTarget > Math.PI / 4) { // Existing condition, adjusted
+            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.2; // Reduced acceleration
+        } else {
+            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.75; // Default acceleration
         }
     }
 
