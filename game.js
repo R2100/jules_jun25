@@ -1,16 +1,101 @@
 // --- CONFIG & GLOBALS ---
-const GAME_VERSION = "1.0.5"; 
+const GAME_VERSION = "1.0.5";
+
+// Socket.io setup
+const socket = io();
+
+// Global Variables for Player State
+let myPlayerId = null;
+let gameEntities = {}; // Stores all dynamic entities (players, bots)
+
+socket.on('connect', () => {
+  console.log('Connected to Socket.io server! Waiting for join confirmation...');
+});
+
+socket.on('disconnect', () => {
+  console.log('Disconnected from Socket.io server.');
+  // Optionally, clear gameEntities or show a disconnected message
+  gameEntities = {};
+  // scene.clear(); // Or handle more gracefully
+});
+
+socket.on('joinSuccess', (data) => {
+    myPlayerId = data.playerId;
+    console.log('Successfully joined game! My player ID is:', myPlayerId);
+    console.log('Initial players data:', data.initialPlayers);
+
+    for (const playerId in data.initialPlayers) {
+        if (data.initialPlayers.hasOwnProperty(playerId)) {
+            const playerData = data.initialPlayers[playerId];
+            if (!gameEntities[playerId]) {
+                const color = playerId === myPlayerId ? 0xff0000 : 0x0000ff; // Red for self, blue for others
+                gameEntities[playerId] = createBumperCar(color);
+                gameEntities[playerId].position.set(playerData.x, playerData.y, playerData.z);
+                if (playerData.rotationY) gameEntities[playerId].rotation.y = playerData.rotationY;
+                else gameEntities[playerId].rotation.y = 0; // Ensure rotation is initialized
+                gameEntities[playerId].name = playerData.name;
+                gameEntities[playerId].userData.score = playerData.score || 0; // Ensure score is initialized
+                if (scene) { // Ensure scene is initialized before adding
+                    scene.add(gameEntities[playerId]);
+                    console.log('Added initial player to scene:', playerData.name, 'at', gameEntities[playerId].position);
+                } else {
+                    console.error("Scene not initialized when trying to add initial player:", playerData.name);
+                }
+            }
+        }
+    }
+    // If the main player's car (car1) was created before joinSuccess, remove it or reassign.
+    // For simplicity with the new flow, car1 will be gameEntities[myPlayerId]
+    if (car1 && car1.id !== myPlayerId) { // If car1 was a placeholder and not the actual player car
+        if (scene) scene.remove(car1);
+        car1 = null;
+    }
+    if (gameEntities[myPlayerId]) {
+        car1 = gameEntities[myPlayerId]; // Assign car1 to be the player's car from gameEntities
+    }
+    updateScoreDisplay(); // Update scores with initial data
+});
+
+socket.on('playerJoined', (playerData) => {
+    if (playerData.id === myPlayerId) return; // Don't re-add self
+    if (!gameEntities[playerData.id]) {
+        console.log('Player joined:', playerData.name, playerData);
+        const color = 0x00ff00; // Green for new players joining
+        gameEntities[playerData.id] = createBumperCar(color);
+        gameEntities[playerData.id].position.set(playerData.x, playerData.y, playerData.z);
+        if (playerData.rotationY) gameEntities[playerData.id].rotation.y = playerData.rotationY;
+        else gameEntities[playerData.id].rotation.y = 0;
+        gameEntities[playerData.id].name = playerData.name;
+        gameEntities[playerData.id].userData.score = playerData.score || 0;
+        if (scene) {
+            scene.add(gameEntities[playerData.id]);
+        } else {
+            console.error("Scene not initialized when trying to add new player:", playerData.name);
+        }
+        updateScoreDisplay();
+    }
+});
+
+socket.on('playerLeft', (playerId) => {
+    if (gameEntities[playerId]) {
+        console.log('Player left:', gameEntities[playerId].name);
+        if (scene) scene.remove(gameEntities[playerId]);
+        delete gameEntities[playerId];
+        updateScoreDisplay(); // Update display as player list changed
+    }
+});
+
+
 // Basic Three.js setup
 let scene, camera, renderer;
 let gameCanvas;
-let car1, car2;
-// const carSpeed = 0.1; // Will be replaced by new physics properties
-// const rotationSpeed = 0.05; // Will be replaced by new physics properties
+let car1; // This will now primarily refer to gameEntities[myPlayerId]
+// let car2; // car2 is removed as it's for a second local player
 const keysPressed = {};
 let deltaTime = 0;
 let lastTime = performance.now();
-const botCars = [];
-const NUM_BOTS = 10;
+const botCars = []; // Bot logic will be server-side primarily, client might receive state for them
+const NUM_BOTS = 0; // Adjusted, as bots are server-controlled. Client might not need this.
 const walls = []; 
 
 // Camera state variables & defaults
@@ -206,7 +291,10 @@ function createWall(width, height, depth, color, position) {
 
 
 // --- INITIALIZATION (init) ---
-function init() {
+// Global references for name input UI
+let nameInputContainer, playerNameInput, submitNameButton;
+
+function initializeGameScene(playerName) {
     // Get the canvas element
     gameCanvas = document.getElementById('gameCanvas');
 
@@ -227,23 +315,17 @@ function init() {
     const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x808080, side: THREE.DoubleSide, metalness: 0.3, roughness: 0.8 }); // Gray color
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2; // Rotate to be horizontal
-    // ground.position.y = -0.2; // If cars are at y=0, this would be just below. Our cars' base is at y=0.
     scene.add(ground);
 
     // Create Boundary Walls
-    // defaultCameraPosition.copy(camera.position); // Already set globally
-    // defaultCameraLookAt.copy(scene.position);   // Already set globally
-
     const toggleButton = document.getElementById('toggleCameraBtn');
     if (toggleButton) {
         toggleButton.addEventListener('click', () => {
             isFirstPersonView = !isFirstPersonView;
             if (!isFirstPersonView) {
-                // When switching back to default view, reset camera immediately
                 camera.position.copy(defaultCameraPosition);
                 camera.lookAt(defaultCameraLookAt);
             }
-            // No need to explicitly set first-person camera here, animate loop will handle it.
         });
     } else {
         console.warn("Toggle Camera button not found.");
@@ -253,20 +335,11 @@ function init() {
     const wallThickness = 0.5;
     const wallColor = 0x666666; // Darker gray
 
-    // Front wall (-z direction)
     createWall(30 + wallThickness, wallHeight, wallThickness, wallColor, new THREE.Vector3(0, wallHeight / 2, -20 - wallThickness / 2));
-    // Back wall (+z direction)
     createWall(30 + wallThickness, wallHeight, wallThickness, wallColor, new THREE.Vector3(0, wallHeight / 2, 10 + wallThickness / 2));
-    // Left wall (-x direction)
     createWall(wallThickness, wallHeight, 40 + wallThickness, wallColor, new THREE.Vector3(-15 - wallThickness / 2, wallHeight / 2, 0));
-    // Right wall (+x direction)
     createWall(wallThickness, wallHeight, 40 + wallThickness, wallColor, new THREE.Vector3(15 + wallThickness / 2, wallHeight / 2, 0));
-
-    // Add Central Vertical Wall
-    // Parameters: width, height, depth, color, position
-    // Assuming wallHeight is 1.0 as used for boundary walls. If not, use the correct height.
-    // The y-position of the wall should be wallHeight / 2.
-    const centralWallHeight = 1.0; // Match other walls or define as needed
+    const centralWallHeight = 1.0;
     createWall(1, wallHeight, 7, 0xccaa88, new THREE.Vector3(0,  0  , - wallHeight*3 ));
 
     // Keyboard event listeners
@@ -278,62 +351,28 @@ function init() {
     }, false);
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // color, intensity
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
-
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(5, 10, 7.5);
     scene.add(directionalLight);
 
-    // Create cars
-    car1 = createBumperCar(0xff0000); // Red car
-    if (car1) {
-        car1.position.x = -2;
-        scene.add(car1);
-        car1.name = "Player 1";
-    }
+    // Create cars - This is now handled by 'joinSuccess' and 'playerJoined'
+    // car1 = createBumperCar(0xff0000); // Player's car is now from gameEntities
+    // if (car1) {
+    //     // car1.position.x = -2; // Server will provide position
+    //     // scene.add(car1); // Added via gameEntities
+    //     car1.name = playerName;
+    // }
 
-    car2 = createBumperCar(0x0000ff); // Blue car
-    if (car2) {
-        car2.position.x = 2;
-        scene.add(car2);
-        car2.name = "Player 2";
-    }
+    // car2 is removed
+    // if (car2) {
+    //     scene.remove(car2); // Ensure it's removed if it was ever added
+    //     car2 = null;
+    // }
 
-    // Adjust camera position to see the cars - This is now handled by camera.position.copy(defaultCameraPosition) above
-    // camera.position.set(0, 5, 10); // x, y, z 
-    // camera.lookAt(scene.position); // Look at the center of the scene - Handled by camera.lookAt(defaultCameraLookAt)
-
-    for (let i = 0; i < NUM_BOTS; i++) {
-        const botColor = Math.random() * 0xffffff; // Random color for bots
-        const bot = createBumperCar(botColor);
-		bot.userData.gripFactor = Math.random() * 0.4; // Random bot rip
-        bot.name = "bot" + i;
-
-        // Position bots (simple initial placement)
-        bot.position.set((Math.random() * 18) - 9, 0.3, (Math.random() * 18) - 9); // Random X, Z between -9 and 9
-        
-        bot.userData.currentWaypointIndex = 0; 
-
-        // Varied speeds for bots
-        const baseMaxSpeed = bot.userData.maxSpeed; // Get base value set by createBumperCar
-        const baseTurnSpeed = bot.userData.turnSpeed; // Get base value
-
-        const speedVariationFactor = (Math.random() * 0.4) - 0.2; // Random factor between -0.2 and +0.2
-        const turnVariationFactor = (Math.random() * 0.4) - 0.2;  // Random factor between -0.2 and +0.2
-
-        // Apply variation, ensuring it's not less than 50% of base or some reasonable minimum.
-        bot.userData.maxSpeed = Math.max(baseMaxSpeed * 0.5, baseMaxSpeed * (1 + speedVariationFactor));
-        bot.userData.turnSpeed = Math.max(baseTurnSpeed * 0.5, baseTurnSpeed * (1 + turnVariationFactor));
-        
-        // Optional: log the varied speeds for one bot to check
-        // if (i === 0) {
-        //     console.log(`Bot 0 varied speeds: maxSpeed = ${bot.userData.maxSpeed}, turnSpeed = ${bot.userData.turnSpeed}`);
-        // }
-
-        scene.add(bot);
-        botCars.push(bot);
-    }
+    // Bot creation will be handled by server. Client will receive 'playerJoined' or similar for bots.
+    // for (let i = 0; i < NUM_BOTS; i++) { ... } // Remove local bot creation loop
 
     // Handle window resize
     window.addEventListener('resize', onWindowResize, false);
@@ -344,27 +383,13 @@ function init() {
     // --- Grip Factor Slider Logic ---
     const gripSlider = document.getElementById('gripSlider');
     const gripValueSpan = document.getElementById('gripValue');
-
     if (gripSlider && gripValueSpan) {
-        // Set initial display value based on slider's default (which matches car's initial gripFactor)
         gripValueSpan.textContent = parseFloat(gripSlider.value).toFixed(2);
-
         gripSlider.addEventListener('input', () => {
             const newGripFactor = parseFloat(gripSlider.value);
             gripValueSpan.textContent = newGripFactor.toFixed(2);
-
-            // Apply the new grip factor to all PLAYER cars
-            if (car1 && car1.userData) {
-                car1.userData.gripFactor = newGripFactor;
-            }
-            if (car2 && car2.userData) {
-                car2.userData.gripFactor = newGripFactor;
-            }
-           /* botCars.forEach(bot => {
-                if (bot.userData) {
-                    bot.userData.gripFactor = newGripFactor;
-                }
-            });*/
+            const myCar = gameEntities[myPlayerId];
+            if (myCar && myCar.userData) myCar.userData.gripFactor = newGripFactor;
         });
     } else {
         console.warn("Grip factor slider UI elements not found.");
@@ -376,6 +401,40 @@ function init() {
     } else {
         console.warn("Version display span ('gameVersionSpan') not found in HTML.");
     }
+
+    updateScoreDisplay(); // Initial score display after game scene is ready
+}
+
+function init() {
+    // Socket connection is already established globally
+
+    nameInputContainer = document.getElementById('nameInputContainer');
+    playerNameInput = document.getElementById('playerNameInput');
+    submitNameButton = document.getElementById('submitNameButton');
+
+    if (!nameInputContainer || !playerNameInput || !submitNameButton) {
+        console.error("Name input UI elements not found!");
+        // Display a message to the user on the page itself
+        document.body.innerHTML = '<div style="color: red; text-align: center; margin-top: 50px;">Error: Could not find name input UI. Please refresh or report this issue.</div>';
+        return;
+    }
+
+    submitNameButton.addEventListener('click', () => {
+        const playerName = playerNameInput.value.trim();
+        if (playerName === "") {
+            alert("Please enter your name to join the game.");
+            return;
+        }
+
+        if (nameInputContainer) {
+            nameInputContainer.style.display = 'none';
+        }
+
+        socket.emit('playerJoinRequest', { name: playerName });
+
+        // Now initialize the actual game scene
+        initializeGameScene(playerName);
+    });
 }
 
 function onWindowResize() {
@@ -384,107 +443,47 @@ function onWindowResize() {
     renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// function updateCarMovement() { // REMOVED - Replaced by handlePlayerInput and applyCarPhysics
-// ... (old content)
-// }
 
 function handlePlayerInput() {
-    if (!car1 || !car2) return;
-
-    // Car 1 (Arrows)
-    if (keysPressed['arrowup']) {
-        car1.userData.accelerationValue = car1.userData.accelerationRate;
-    } else if (keysPressed['arrowdown']) {
-        car1.userData.accelerationValue = -car1.userData.accelerationRate;
-    } else {
-        car1.userData.accelerationValue = 0;
+    // This function now primarily sends input to the server.
+    // Client-side prediction could be added here later for smoother perceived movement.
+    if (!myPlayerId || !gameEntities[myPlayerId]) {
+        // console.warn("handlePlayerInput: No player ID or player entity yet.");
+        return;
     }
 
-    if (keysPressed['arrowleft']) {
-        car1.userData.turnValue = car1.userData.turnSpeed;
-    } else if (keysPressed['arrowright']) {
-        car1.userData.turnValue = -car1.userData.turnSpeed;
-    } else {
-        car1.userData.turnValue = 0;
-    }
+    // Use WASD for movement, Arrows can be secondary or removed
+    const inputPayload = {
+        up: keysPressed['w'] || keysPressed['arrowup'],
+        down: keysPressed['s'] || keysPressed['arrowdown'],
+        left: keysPressed['a'] || keysPressed['arrowleft'],
+        right: keysPressed['d'] || keysPressed['arrowright']
+    };
+    socket.emit('playerInput', inputPayload);
 
-    // Car 2 (WASD)
-    if (keysPressed['w']) {
-        car2.userData.accelerationValue = car2.userData.accelerationRate;
-    } else if (keysPressed['s']) {
-        car2.userData.accelerationValue = -car2.userData.accelerationRate;
-    } else {
-        car2.userData.accelerationValue = 0;
-    }
-
-    if (keysPressed['a']) {
-        car2.userData.turnValue = car2.userData.turnSpeed;
-    } else if (keysPressed['d']) {
-        car2.userData.turnValue = -car2.userData.turnSpeed;
-    } else {
-        car2.userData.turnValue = 0;
-    }
+    // The old direct manipulation of car1.userData.accelerationValue and turnValue is removed.
+    // Server will process input and send back game state.
 }
+
 function applyCarPhysics(car, dt) {
+    // NOTE: Client-side physics is largely being removed or simplified.
+    // The server will be the source of truth for positions.
+    // This function might be used for simple prediction or interpolation later.
+    // For now, we can comment out its direct application in animate().
     if (!car || dt === 0) return;
 
-    // 1. Aplicar rotación PRIMERO
-    car.rotateY(car.userData.turnValue * dt);
-
-    // Obtener dirección actual del coche
-    const localForward = new THREE.Vector3(0, 0, 1);
-    const worldForward = localForward.applyQuaternion(car.quaternion);
-
-    // --- NUEVA LÓGICA DE AGARRE ---
-    // Aplicar el grip ANTES de la aceleración
-    if (typeof car.userData.gripFactor !== 'undefined') {
-        // Calcular componente longitudinal (dirección actual del coche)
-        const currentSpeed = car.userData.velocity.length();
-        const longitudinalVelocity = worldForward.clone().multiplyScalar(currentSpeed);
-        
-        // Calcular componente lateral (no deseado)
-        const lateralVelocity = car.userData.velocity.clone().sub(longitudinalVelocity);
-        
-        // Reducir componente lateral según gripFactor
-        lateralVelocity.multiplyScalar(1 - car.userData.gripFactor);
-        
-        // Combinar componentes
-        car.userData.velocity.copy(longitudinalVelocity.add(lateralVelocity));
-    }
-
-    // 2. Aplicar aceleración DESPUÉS del grip
-    const effectiveAcceleration = worldForward.clone().multiplyScalar(car.userData.accelerationValue);
-    car.userData.velocity.addScaledVector(effectiveAcceleration, dt);
-    
-    // Resto de la física (sin cambios)
-    car.userData.velocity.y = 0;
-    
-    // Fricción cuando no hay aceleración
-    if (Math.abs(car.userData.accelerationValue) < 0.01) {
-        const dampingFactor = Math.max(0, 1.0 - car.userData.linearDamping * dt);
-        car.userData.velocity.multiplyScalar(dampingFactor);
-    }
-    
-    if (car.userData.velocity.lengthSq() < 0.001) {
-        car.userData.velocity.set(0, 0, 0);
-    }
-    
-    // Limitar velocidad máxima
-    if (car.userData.velocity.lengthSq() > car.userData.maxSpeed * car.userData.maxSpeed) {
-        car.userData.velocity.setLength(car.userData.maxSpeed);
-    }
-    
-    car.userData.velocity.y = 0;
-    car.position.addScaledVector(car.userData.velocity, dt);
-    car.position.y = 0.3;
+    // Simplified: update position based on velocity IF we were doing client prediction.
+    // car.position.addScaledVector(car.userData.velocity, dt);
+    // car.position.y = 0.3;
+    // car.rotateY(car.userData.turnValue * dt); // If turnValue is updated by server state
 }
 
 // --- UI, CAMERA & VISUAL EFFECTS ---
 function updateVisualEffects(dt) {
-    const allCars = [car1, car2, ...botCars].filter(c => c && c.userData.isHit); // Process only cars that are hit
-
-    for (const car of allCars) {
-        if (car.userData.hitTimer > 0) {
+    // Iterate over gameEntities for visual effects
+    for (const id in gameEntities) {
+        const car = gameEntities[id];
+        if (car && car.userData.isHit && car.userData.hitTimer > 0) {
             car.userData.hitTimer -= dt;
             if (car.userData.hitTimer <= 0) {
                 car.userData.isHit = false;
@@ -492,7 +491,7 @@ function updateVisualEffects(dt) {
                 const carBodyMesh = car.getObjectByName("carBodySphere");
                 if (carBodyMesh && car.userData.originalColor !== null) {
                     carBodyMesh.material.color.setHex(car.userData.originalColor);
-                    car.userData.originalColor = null; // Clear stored color
+                    car.userData.originalColor = null;
                 }
             }
         }
@@ -500,19 +499,20 @@ function updateVisualEffects(dt) {
 }
 
 function triggerHitEffect(targetCar) {
+    // This function might still be called if server sends 'hit' event,
+    // or for client-side predicted effects.
     if (!targetCar || !targetCar.userData) return;
 
     const carBodyMesh = targetCar.getObjectByName("carBodySphere");
     if (!carBodyMesh) return;
 
-    // Store original color only if not already flashing (or if originalColor is not set yet)
     if (!targetCar.userData.isHit || targetCar.userData.originalColor === null) {
         targetCar.userData.originalColor = carBodyMesh.material.color.getHex();
     }
     
     targetCar.userData.isHit = true;
-    targetCar.userData.hitTimer = 0.25; // Flash duration in seconds
-    carBodyMesh.material.color.setHex(0xffffff); // Flash white
+    targetCar.userData.hitTimer = 0.25;
+    carBodyMesh.material.color.setHex(0xffffff);
 }
 
 
@@ -521,150 +521,83 @@ function animate() {
     requestAnimationFrame(animate);
     
     const currentTime = performance.now();
-    deltaTime = (currentTime - lastTime) / 1000; // deltaTime in seconds
-    if (deltaTime > 0.1) deltaTime = 0.1; // Clamp large deltaTimes to prevent instability
+    deltaTime = (currentTime - lastTime) / 1000;
+    if (deltaTime > 0.1) deltaTime = 0.1;
     lastTime = currentTime;
 
-    handlePlayerInput(); 
+    handlePlayerInput(); // Still call to send inputs to server
 
-    if (car1) applyCarPhysics(car1, deltaTime);
-    if (car2) applyCarPhysics(car2, deltaTime);
+    // Client-side physics application is removed for player cars
+    // if (car1) applyCarPhysics(car1, deltaTime);
+    // if (car2) applyCarPhysics(car2, deltaTime); // car2 is removed
 
-    // Bot AI and Physics
-    for (const bot of botCars) {
-        if (car1) updateBotAI(bot, car1, deltaTime); // Bots target car1
-        applyCarPhysics(bot, deltaTime);
-    }
+    // Bot AI and Physics are server-side. Client updates bots based on server state.
+    // for (const bot of botCars) { ... } // Remove local bot processing
 
     updateVisualEffects(deltaTime); 
 
-    updateCamera(deltaTime); // Add this call
+    updateCamera(deltaTime);
     
-    // Update OBB matrices for cars
-    if (car1) {
-        car1.updateMatrixWorld(true); // Ensure matrixWorld is up-to-date
-        if (car1.userData.obb) car1.userData.obb.matrix.copy(car1.matrixWorld);
-    }
-    if (car2) {
-        car2.updateMatrixWorld(true);
-        if (car2.userData.obb) car2.userData.obb.matrix.copy(car2.matrixWorld);
-    }
-    for (const bot of botCars) {
-        bot.updateMatrixWorld(true);
-        if (bot.userData.obb) bot.userData.obb.matrix.copy(bot.matrixWorld);
-    }
+    // Update OBB matrices for all entities based on server state (or prediction)
+    // This is important if client-side effects or non-authoritative checks still use them.
+    for (const id in gameEntities) {
+        const entity = gameEntities[id];
+        if (entity && entity.userData.obb) {
+            entity.updateMatrixWorld(true);
+            entity.userData.obb.matrix.copy(entity.matrixWorld);
 
-    // Update OBB matrices for car collision zones
-    const allCarsForZoneUpdates = [car1, car2, ...botCars].filter(c => c && c.userData.obb);
-    for (const car of allCarsForZoneUpdates) {
-        // The car's matrixWorld should be up-to-date from the block above.
-        // Children's matrixWorld are also updated when parent's is.
-        for (const child of car.children) {
-            if (child.name && child.name.endsWith("Zone") && child.userData.obb) {
-                child.userData.obb.matrix.copy(child.matrixWorld);
+            for (const child of entity.children) {
+                if (child.name && child.name.endsWith("Zone") && child.userData.obb) {
+                    child.updateMatrixWorld(true); // Ensure child's matrix is also updated
+                    child.userData.obb.matrix.copy(child.matrixWorld);
+                }
             }
         }
     }
 
-    // Car-Wall Collisions
-    const allCars = [car1, car2, ...botCars].filter(c => c); // Get all valid car objects
-
-    for (const car of allCars) {
-        if (!car.userData.obb) continue; // Skip if no OBB (should not happen)
-        for (const wall of walls) {
-            if (checkOBBCollision(car.userData.obb, wall.userData.obb)) {
-                handleCarWallCollision(car, wall);
-                // break; // Optional: if one wall collision is enough for this frame
-            }
-        }
-    }
+    // Client-side collision detection and handling should be removed or significantly simplified.
+    // Server will be authoritative.
+    // const allCars = Object.values(gameEntities).filter(c => c);
+    // for (const car of allCars) {
+    //     if (!car.userData.obb) continue;
+    //     for (const wall of walls) {
+    //         if (checkOBBCollision(car.userData.obb, wall.userData.obb)) {
+    //             // handleCarWallCollision(car, wall); // Server handles this
+    //         }
+    //     }
+    // }
     
-    // Collision Checks
-    // Player 1 vs Player 2
-    if (car1 && car2 && checkCollision(car1, car2)) {
-        handleCollision(car1, car2);
-    }
+    // Example: Iterating through gameEntities for potential rendering updates or client effects
+    // for (const id_A in gameEntities) {
+    //     const entity_A = gameEntities[id_A];
+    //     for (const id_B in gameEntities) {
+    //         if (id_A === id_B) continue;
+    //         const entity_B = gameEntities[id_B];
+    //         // if (checkCollision(entity_A, entity_B)) {
+    //         //     // handleCollision(entity_A, entity_B); // Server handles this
+    //         // }
+    //     }
+    // }
 
-    // Player cars vs Bot cars
-    for (const bot of botCars) {
-        if (car1 && checkCollision(car1, bot)) {
-            handleCollision(car1, bot);
-        }
-        if (car2 && checkCollision(car2, bot)) {
-            handleCollision(car2, bot);
-        }
-
-        // Bot vs other Bots (avoid double checks and self-collision)
-        for (const otherBot of botCars) {
-            if (bot.id < otherBot.id && checkCollision(bot, otherBot)) { // Check bot.id < otherBot.id to avoid duplicates and self-collision
-                handleCollision(bot, otherBot);
-            }
-        }
+    if (renderer && scene && camera) { // Ensure they are initialized
+        renderer.render(scene, camera);
     }
-    renderer.render(scene, camera);
 }
 
 
 // --- BOT AI ---
-function updateBotAI(bot, targetIgnored, dt) { // target parameter is now effectively ignored
-    if (!bot || dt === 0 || typeof bot.userData.currentWaypointIndex === 'undefined') {
-        // console.warn("Bot AI update skipped for bot:", bot ? bot.name : "undefined bot", "or dt is 0 or waypoint index missing");
-        return;
-    }
-
-    const currentTargetPos = circuitWaypoints[bot.userData.currentWaypointIndex];
-    if (!currentTargetPos) {
-        // console.error("Bot AI: currentTargetPos is undefined for bot", bot.name, "index", bot.userData.currentWaypointIndex);
-        return;
-    }
-
-    const directionToTarget = new THREE.Vector3().subVectors(currentTargetPos, bot.position);
-    const distanceToTarget = directionToTarget.length();
-    
-    // Normalize AFTER getting length
-    if (distanceToTarget > 0.001) { // Avoid normalizing zero vector
-        directionToTarget.normalize(); 
-    } else {
-        // Bot is very close or at the target, no specific direction needed, focus on switching waypoint
-        bot.userData.turnValue = 0;
-        bot.userData.accelerationValue = 0; // Stop briefly at waypoint if needed
-        // Waypoint switching logic will handle moving to the next target
-    }
-
-    const botForward = new THREE.Vector3(0, 0, 1).applyQuaternion(bot.quaternion);
-    
-   if (distanceToTarget > 0.001) { // Only calculate angle if there's a direction
-        let angleToTarget = botForward.angleTo(directionToTarget);
-        const cross = new THREE.Vector3().crossVectors(botForward, directionToTarget);
-        
-        const turnThreshold = 0.15; // Radians, about 8.6 degrees
-        if (angleToTarget > turnThreshold) {
-            bot.userData.turnValue = (cross.y > 0 ? 1 : -1) * bot.userData.turnSpeed * 0.8;
-        } else {
-            bot.userData.turnValue = 0; // Mostly aligned, stop turning
-        }
-
-        // Adjust Acceleration/Speed Logic for Turns
-        if (angleToTarget > Math.PI / 6 && bot.userData.velocity.length() > bot.userData.maxSpeed * 0.5) {
-            bot.userData.accelerationValue = -bot.userData.accelerationRate * 0.5; // Apply brakes
-        } else if (angleToTarget > Math.PI / 4) { // Existing condition, adjusted
-            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.2; // Reduced acceleration
-        } else {
-            bot.userData.accelerationValue = bot.userData.accelerationRate * 0.75; // Default acceleration
-        }
-    }
-
-    // Waypoint switching logic
-    const waypointReachedThreshold = 2.5; // How close to get before switching
-    if (distanceToTarget < waypointReachedThreshold) {
-        bot.userData.currentWaypointIndex = (bot.userData.currentWaypointIndex + 1) % circuitWaypoints.length;
-        // console.log(`${bot.name} reached waypoint, next is ${circuitWaypoints[bot.userData.currentWaypointIndex].toArray().join(',')}`);
-    }
+// Bot AI is now server-side. This function can be removed or adapted if client needs to predict bot movement.
+function updateBotAI(bot, targetIgnored, dt) {
+    // if (!bot || dt === 0 || typeof bot.userData.currentWaypointIndex === 'undefined') {
+    //     return;
+    // }
+    // ... (rest of bot AI logic removed as it's server-side)
 }
 
 
 // --- COLLISION DETECTION ---
-// Helper function to get OBB vertices in world space
+// These functions might still be useful for client-side effects or non-authoritative feedback,
+// but primary collision detection is server-side.
 function getOBBVertices(obb) {
     const vertices = [];
     const min = obb.box.min;
@@ -885,34 +818,48 @@ function handleCollision(obj1, obj2) { // Car-car
 }
 
 function updateScoreDisplay() {
-    const scoreCar1El = document.getElementById('scoreCar1');
-    if (scoreCar1El && car1 && typeof car1.userData.score !== 'undefined') {
-        scoreCar1El.textContent = `${car1.name}: ${car1.userData.score}`;
-    }
+    const scoreCar1El = document.getElementById('scoreCar1'); // This might represent 'myPlayer'
+    const scoreCar2El = document.getElementById('scoreCar2'); // This could be an opponent or removed/repurposed
 
-    const scoreCar2El = document.getElementById('scoreCar2');
-    if (scoreCar2El && car2 && typeof car2.userData.score !== 'undefined') {
-        scoreCar2El.textContent = `${car2.name}: ${car2.userData.score}`;
-    }
+    // Clear existing scores first
+    if(scoreCar1El) scoreCar1El.textContent = "";
+    if(scoreCar2El) scoreCar2El.textContent = "";
 
     const scoreboardDiv = document.getElementById('scoreboard');
     if (!scoreboardDiv) return;
 
-    // Remove old bot scores to prevent duplicates if this function is called multiple times
-    const existingBotScoreDivs = scoreboardDiv.querySelectorAll('.bot-score');
-    existingBotScoreDivs.forEach(div => div.remove());
+    // Remove old bot/player scores to prevent duplicates
+    const existingScoreDivs = scoreboardDiv.querySelectorAll('.player-score-display');
+    existingScoreDivs.forEach(div => div.remove());
 
-    botCars.forEach((bot) => {
-        if (typeof bot.userData.score !== 'undefined') {
-            const botScoreDiv = document.createElement('div');
-            botScoreDiv.className = 'bot-score'; // Add class for easy removal
-            botScoreDiv.textContent = `${bot.name}: ${bot.userData.score}`;
-            scoreboardDiv.appendChild(botScoreDiv);
+    let playerCount = 0;
+    for (const id in gameEntities) {
+        const entity = gameEntities[id];
+        if (entity && typeof entity.userData.score !== 'undefined') {
+            let displayEl;
+            if (id === myPlayerId && scoreCar1El) {
+                displayEl = scoreCar1El;
+            } else if (playerCount === 1 && scoreCar2El) { // Show first opponent in car2 slot
+                displayEl = scoreCar2El;
+            } else { // Dynamically add for others
+                displayEl = document.createElement('div');
+                displayEl.className = 'player-score-display'; // New class for dynamic scores
+                scoreboardDiv.appendChild(displayEl);
+            }
+            if(displayEl) displayEl.textContent = `${entity.name}: ${entity.userData.score}`;
+            playerCount++;
         }
-    });
+    }
+    // Hide car2 score if no second player shown in that slot
+    if (playerCount < 2 && scoreCar2El) {
+         scoreCar2El.textContent = ""; // Or set display to none
+    }
 }
 
+
 function handleCarWallCollision(car, wall) {
+    // Client-side wall collision is non-authoritative. Server handles the actual physics.
+    // This could be used for immediate visual feedback if desired.
     if (!car.userData.velocity) return;
 
     // --- Determine Collision Normal (Robust for axis-aligned static walls) ---
@@ -986,10 +933,10 @@ function handleCarWallCollision(car, wall) {
 // Initialize the game when the window loads
 window.onload = () => {
     init();
-    updateScoreDisplay(); // Initial score display
+    // updateScoreDisplay(); // Moved to after game scene initialization
 };
 
-// --- PHYSICS & MOVEMENT --- (Re-locating applyCarPhysics and handlePlayerInput here for better grouping)
+// --- PHYSICS & MOVEMENT ---
 function applyCarPhysics00(car, dt) { // Moved definition to be grouped with other physics/movement
 	console.log(`[applyCarPhysics] Entry for ${car.name || 'UnnamedCar'}. DT: ${dt.toFixed(4)}, Vel: (${car.userData.velocity.x.toFixed(2)},${car.userData.velocity.y.toFixed(2)},${car.userData.velocity.z.toFixed(2)})`);
     if (!car || dt === 0) return; // Don't do physics if car doesn't exist or time hasn't passed
@@ -1068,33 +1015,22 @@ function handlePlayerInput() { // Moved definition
 }
 
 
-// --- UI, CAMERA & VISUAL EFFECTS --- (updateCamera was here, it's fine)
-function updateCamera(dt) { // Definition was here, confirming its location
-    if (isFirstPersonView && car1) {
-        // Ensure car1's world matrix is up-to-date before using localToWorld
-        // This is crucial if car1's transform changed in the same frame before this function.
-        // applyCarPhysics updates position/rotation, but matrixWorld might not be rebuilt yet.
-        car1.updateMatrixWorld(true); 
+// --- UI, CAMERA & VISUAL EFFECTS ---
+function updateCamera(dt) {
+    const playerCar = gameEntities[myPlayerId];
+    if (isFirstPersonView && playerCar) {
+        playerCar.updateMatrixWorld(true);
 
-        const cameraOffset = new THREE.Vector3(0, 5, -5.8); // x, y (height from car center), z (distance behind)
-                                                             // Car body center is at y=0.3. Sphere height is 0.6.
-                                                             // So y=0.7 for offset means camera is 0.4 above car's center.
-        const lookAtOffset = new THREE.Vector3(0, 0.4, 5.0);  // Point to look at, in front of car, y relative to car center.
+        const cameraOffset = new THREE.Vector3(0, 5, -5.8);
+        const lookAtOffset = new THREE.Vector3(0, 0.4, 5.0);
 
-        const cameraWorldPosition = car1.localToWorld(cameraOffset.clone());
-        const lookAtWorldPosition = car1.localToWorld(lookAtOffset.clone());
-
-        // --- Debugging Step: Try direct copy first ---
-        camera.position.copy(cameraWorldPosition); 
-        // If direct copy works, then the lerp was the issue.
-        // We can then reinstate lerp with a potentially adjusted factor or ensure dt is not problematic.
-        // For example, a more stable lerp:
-        // const lerpFactor = Math.min(15 * dt, 1.0); // Ensure factor doesn't exceed 1.0
-        // camera.position.lerp(cameraWorldPosition, lerpFactor); 
+        const cameraWorldPosition = playerCar.localToWorld(cameraOffset.clone());
+        const lookAtWorldPosition = playerCar.localToWorld(lookAtOffset.clone());
         
+        camera.position.copy(cameraWorldPosition);
         camera.lookAt(lookAtWorldPosition); 
 
-    } else if (!isFirstPersonView) {
+    } else if (!isFirstPersonView && camera) { // Ensure camera exists
         camera.position.copy(defaultCameraPosition);
         camera.lookAt(defaultCameraLookAt);
     }
