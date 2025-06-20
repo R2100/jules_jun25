@@ -1,5 +1,5 @@
 // --- CONFIG & GLOBALS ---
-const GAME_VERSION = "1.0.0";
+const GAME_VERSION = "1.0.3"; 
 // Basic Three.js setup
 let scene, camera, renderer;
 let gameCanvas;
@@ -11,7 +11,7 @@ let deltaTime = 0;
 let lastTime = performance.now();
 const botCars = [];
 const NUM_BOTS = 10;
-const walls = [];
+const walls = []; 
 
 // Camera state variables & defaults
 let isFirstPersonView = false;
@@ -32,11 +32,11 @@ function createBumperCar(color) {
 
     // Car body (scaled sphere - making it oval)
     // SphereGeometry(radius, widthSegments, heightSegments)
-    const bodyGeometry = new THREE.SphereGeometry(0.5, 32, 16);
+    const bodyGeometry = new THREE.SphereGeometry(0.5, 32, 16); 
     const bodyMaterial = new THREE.MeshStandardMaterial({ color: color, metalness: 0.5, roughness: 0.5 });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
     body.name = "carBodySphere"; // Add this line
-
+    
     // Scale to make it oval: x, y, z scaling factors
     // Longer along local Z (forward), slightly flatter on Y
     body.scale.set(0.7, 0.6, 1.5); // Narrower (X) and longer (Z)
@@ -45,17 +45,17 @@ function createBumperCar(color) {
 
     // UserData properties
     car.userData.velocity = new THREE.Vector3(0, 0, 0);
-    car.userData.accelerationValue = 0;
+    car.userData.accelerationValue = 0; 
     car.userData.accelerationRate = 12.0; // m/s^2
-    car.userData.linearDamping = 1.2;
-    car.userData.maxSpeed = 35.0;    // m/s
-    car.userData.turnValue = 0;
-    car.userData.turnSpeed = 2.0;
+    car.userData.linearDamping = 3; // ~rozamiento/freno, original era 1.2
+    car.userData.maxSpeed = 20.0;    // m/s
+    car.userData.turnValue = 0;      
+    car.userData.turnSpeed = 2.0;   
     car.userData.score = 0;
     car.userData.isHit = false;
     car.userData.hitTimer = 0;
-    car.userData.originalColor = null;
-    car.userData.gripFactor = 0.1; // Initial low grip (more drift)
+    car.userData.originalColor = null; 
+    car.userData.gripFactor = 0.7; // Initial low grip (more drift)
 
     // Bumper (torus) - adjust to fit the oval shape
     // TorusGeometry(radius, tube, radialSegments, tubularSegments)
@@ -85,19 +85,19 @@ function createBumperCar(color) {
     marker.position.set(0, 0.3, 0.75); // Position at the new front
     marker.rotation.x = Math.PI / 2; // Point the cone forward along Z
     car.add(marker);
-
+    
     // New OBB setup
     car.userData.obb = {};
-    // Define the local bounds of the car.
+    // Define the local bounds of the car. 
     // The car's visual components are already added to the 'car' THREE.Group.
     // We can compute this local box once.
-    // Important: Ensure the car group itself is at origin (0,0,0) and has no rotation
+    // Important: Ensure the car group itself is at origin (0,0,0) and has no rotation 
     // when this is called if using setFromObject on the group, or calculate it manually.
-    // Since sub-components are positioned relative to the car group's origin,
+    // Since sub-components are positioned relative to the car group's origin, 
     // setFromObject(car) should give the correct local bounds if car itself is at origin.
     // Let's assume createBumperCar is called, and then the car is positioned.
     // So, when createBumperCar is running, 'car' group is at (0,0,0) with no rotation.
-
+    
     const localBox = new THREE.Box3();
     // Temporarily ensure car is at origin and no rotation for accurate local bounds calculation
     const originalPosition = car.position.clone();
@@ -107,7 +107,7 @@ function createBumperCar(color) {
     car.updateMatrixWorld(true); // Force update of matrixWorld for children
 
     localBox.setFromObject(car, true); // true to use precise option if available and needed for groups
-
+    
     // Restore original position and quaternion in case they were set before this part.
     // (Though typically, positioning happens after createBumperCar returns)
     car.position.copy(originalPosition);
@@ -118,9 +118,9 @@ function createBumperCar(color) {
     car.userData.obb.matrix = new THREE.Matrix4(); // This will store the world matrix
 
     // Collision Zones Setup
-    const zoneMaterial = new THREE.MeshStandardMaterial({
+    const zoneMaterial = new THREE.MeshStandardMaterial({ 
         color: 0x00ff00, // Keep a distinct color like green for zones
-        transparent: true,
+        transparent: true, 
         opacity: 0.25,    // Make them translucent
         visible: true     // Make them visible
     });
@@ -134,11 +134,11 @@ function createBumperCar(color) {
     // Front Zone
     const frontZoneDepth = 0.3; // Keep depth
     // Use 85% of new width & height for zone geo width/height
-    const frontZoneGeo = new THREE.BoxGeometry(carBodyDimensions.w * 0.85, carBodyDimensions.h * 0.85, frontZoneDepth);
+    const frontZoneGeo = new THREE.BoxGeometry(carBodyDimensions.w * 0.85, carBodyDimensions.h * 0.85, frontZoneDepth); 
     const frontZone = new THREE.Mesh(frontZoneGeo, zoneMaterial.clone()); // Assuming zoneMaterial is defined
     frontZone.name = "frontZone";
     // Recalculate Z position based on new length (1.5 / 2 = 0.75)
-    frontZone.position.set(0, carBodyYPos, (carBodyDimensions.l / 2) - (frontZoneDepth / 2) + 0.05);
+    frontZone.position.set(0, carBodyYPos, (carBodyDimensions.l / 2) - (frontZoneDepth / 2) + 0.05); 
     car.add(frontZone);
 
     // Rear Zone
@@ -153,13 +153,13 @@ function createBumperCar(color) {
     // Side Zones
     const sideZoneWidth = 0.15; // Adjusted width for narrower car
     const sideZoneLength = carBodyDimensions.l * 0.75; // Adjusted length coverage
-
+    
     // Left Side Zone
     const leftZoneGeo = new THREE.BoxGeometry(sideZoneWidth, carBodyDimensions.h * 0.85, sideZoneLength);
     const leftZone = new THREE.Mesh(leftZoneGeo, zoneMaterial.clone());
     leftZone.name = "leftSideZone";
     // Recalculate X position (half-width is 0.7/2 = 0.35)
-    leftZone.position.set(-(carBodyDimensions.w / 2) + (sideZoneWidth / 2), carBodyYPos, 0);
+    leftZone.position.set(-(carBodyDimensions.w / 2) + (sideZoneWidth / 2), carBodyYPos, 0); 
     car.add(leftZone);
 
     // Right Side Zone
@@ -201,7 +201,7 @@ function createWall(width, height, depth, color, position) {
         matrix: wall.matrixWorld.clone() // World matrix (it's static, so clone once)
     };
     walls.push(wall);
-    return wall;
+    return wall; 
 }
 
 
@@ -301,7 +301,7 @@ function init() {
     }
 
     // Adjust camera position to see the cars - This is now handled by camera.position.copy(defaultCameraPosition) above
-    // camera.position.set(0, 5, 10); // x, y, z
+    // camera.position.set(0, 5, 10); // x, y, z 
     // camera.lookAt(scene.position); // Look at the center of the scene - Handled by camera.lookAt(defaultCameraLookAt)
 
     for (let i = 0; i < NUM_BOTS; i++) {
@@ -311,8 +311,8 @@ function init() {
 
         // Position bots (simple initial placement)
         bot.position.set((Math.random() * 18) - 9, 0.3, (Math.random() * 18) - 9); // Random X, Z between -9 and 9
-
-        bot.userData.currentWaypointIndex = 0;
+        
+        bot.userData.currentWaypointIndex = 0; 
 
         // Varied speeds for bots
         const baseMaxSpeed = bot.userData.maxSpeed; // Get base value set by createBumperCar
@@ -324,7 +324,7 @@ function init() {
         // Apply variation, ensuring it's not less than 50% of base or some reasonable minimum.
         bot.userData.maxSpeed = Math.max(baseMaxSpeed * 0.5, baseMaxSpeed * (1 + speedVariationFactor));
         bot.userData.turnSpeed = Math.max(baseTurnSpeed * 0.5, baseTurnSpeed * (1 + turnVariationFactor));
-
+        
         // Optional: log the varied speeds for one bot to check
         // if (i === 0) {
         //     console.log(`Bot 0 varied speeds: maxSpeed = ${bot.userData.maxSpeed}, turnSpeed = ${bot.userData.turnSpeed}`);
@@ -424,68 +424,59 @@ function handlePlayerInput() {
         car2.userData.turnValue = 0;
     }
 }
-
 function applyCarPhysics(car, dt) {
-    if (!car || dt === 0) return; // Don't do physics if car doesn't exist or time hasn't passed
+    if (!car || dt === 0) return;
 
-    // Rotation
+    // 1. Aplicar rotación PRIMERO
     car.rotateY(car.userData.turnValue * dt);
 
-    // Get car's forward direction vector
-    // Standard for Object3D.getWorldDirection is local -Z.
-    // Our car model has its front along its local +Z (where the cone marker is).
+    // Obtener dirección actual del coche
     const localForward = new THREE.Vector3(0, 0, 1);
     const worldForward = localForward.applyQuaternion(car.quaternion);
 
-    // Log state before grip application
-    if (DEBUG_GRIP) console.log(`[${car.name || 'UnknownCar'}] BEFORE GRIP: gripFactor=${car.userData.gripFactor !== undefined ? car.userData.gripFactor.toFixed(2) : 'N/A'}, vel=(${car.userData.velocity.x.toFixed(2)}, ${car.userData.velocity.z.toFixed(2)}), speed=${car.userData.velocity.length().toFixed(2)}`);
-
-    // --- NEW GRIP LOGIC START ---
-    if (typeof car.userData.gripFactor !== 'undefined' && car.userData.velocity.lengthSq() > 0.0001) { // Only apply if car is moving
+    // --- NUEVA LÓGICA DE AGARRE ---
+    // Aplicar el grip ANTES de la aceleración
+    if (typeof car.userData.gripFactor !== 'undefined') {
+        // Calcular componente longitudinal (dirección actual del coche)
         const currentSpeed = car.userData.velocity.length();
-        const targetVelocityAlignedWithCar = worldForward.clone().multiplyScalar(currentSpeed);
-
-        if (DEBUG_GRIP) console.log(`[${car.name || 'UnknownCar'}] GRIP TARGET: targetVel=(${targetVelocityAlignedWithCar.x.toFixed(2)}, ${targetVelocityAlignedWithCar.z.toFixed(2)}), carForward=(${worldForward.x.toFixed(2)}, ${worldForward.z.toFixed(2)}), currentSpeed=${currentSpeed.toFixed(2)}`);
-
-        const lerpAlpha = car.userData.gripFactor; // Changed line
-
-        car.userData.velocity.lerp(targetVelocityAlignedWithCar, lerpAlpha);
-
-        if (DEBUG_GRIP) console.log(`[${car.name || 'UnknownCar'}] AFTER GRIP LERP: newVel=(${car.userData.velocity.x.toFixed(2)}, ${car.userData.velocity.z.toFixed(2)}), lerpAlpha=${lerpAlpha.toFixed(2)}`);
+        const longitudinalVelocity = worldForward.clone().multiplyScalar(currentSpeed);
+        
+        // Calcular componente lateral (no deseado)
+        const lateralVelocity = car.userData.velocity.clone().sub(longitudinalVelocity);
+        
+        // Reducir componente lateral según gripFactor
+        lateralVelocity.multiplyScalar(1 - car.userData.gripFactor);
+        
+        // Combinar componentes
+        car.userData.velocity.copy(longitudinalVelocity.add(lateralVelocity));
     }
-    // --- NEW GRIP LOGIC END ---
 
-    car.userData.velocity.y = 0; // Ensure no vertical velocity accumulation (already existed, ensure it's after grip)
-
-    // Acceleration (based on input)
-    // Note: 'worldForward' here is the car's current orientation, which is correct for applying thrust.
+    // 2. Aplicar aceleración DESPUÉS del grip
     const effectiveAcceleration = worldForward.clone().multiplyScalar(car.userData.accelerationValue);
     car.userData.velocity.addScaledVector(effectiveAcceleration, dt);
-
-    // Linear Damping (Friction)
-    if (Math.abs(car.userData.accelerationValue) < 0.01) { // Only apply damping if not actively accelerating/braking
+    
+    // Resto de la física (sin cambios)
+    car.userData.velocity.y = 0;
+    
+    // Fricción cuando no hay aceleración
+    if (Math.abs(car.userData.accelerationValue) < 0.01) {
         const dampingFactor = Math.max(0, 1.0 - car.userData.linearDamping * dt);
         car.userData.velocity.multiplyScalar(dampingFactor);
     }
-
-    // Stop completely if velocity is very low
+    
     if (car.userData.velocity.lengthSq() < 0.001) {
-        car.userData.velocity.set(0,0,0);
+        car.userData.velocity.set(0, 0, 0);
     }
-
-    // Max Speed Clamp
+    
+    // Limitar velocidad máxima
     if (car.userData.velocity.lengthSq() > car.userData.maxSpeed * car.userData.maxSpeed) {
         car.userData.velocity.setLength(car.userData.maxSpeed);
     }
-
-    // Ensure Y velocity is still zero before position update (belt and suspenders)
+    
     car.userData.velocity.y = 0;
-
-    // Update Position
     car.position.addScaledVector(car.userData.velocity, dt);
-    car.position.y = 0.3; // Hard clamp Y position
+    car.position.y = 0.3;
 }
-
 
 // --- UI, CAMERA & VISUAL EFFECTS ---
 function updateVisualEffects(dt) {
@@ -517,7 +508,7 @@ function triggerHitEffect(targetCar) {
     if (!targetCar.userData.isHit || targetCar.userData.originalColor === null) {
         targetCar.userData.originalColor = carBodyMesh.material.color.getHex();
     }
-
+    
     targetCar.userData.isHit = true;
     targetCar.userData.hitTimer = 0.25; // Flash duration in seconds
     carBodyMesh.material.color.setHex(0xffffff); // Flash white
@@ -527,13 +518,13 @@ function triggerHitEffect(targetCar) {
 // --- CORE GAME LOOP (animate) ---
 function animate() {
     requestAnimationFrame(animate);
-
+    
     const currentTime = performance.now();
     deltaTime = (currentTime - lastTime) / 1000; // deltaTime in seconds
     if (deltaTime > 0.1) deltaTime = 0.1; // Clamp large deltaTimes to prevent instability
     lastTime = currentTime;
 
-    handlePlayerInput();
+    handlePlayerInput(); 
 
     if (car1) applyCarPhysics(car1, deltaTime);
     if (car2) applyCarPhysics(car2, deltaTime);
@@ -544,10 +535,10 @@ function animate() {
         applyCarPhysics(bot, deltaTime);
     }
 
-    updateVisualEffects(deltaTime);
+    updateVisualEffects(deltaTime); 
 
     updateCamera(deltaTime); // Add this call
-
+    
     // Update OBB matrices for cars
     if (car1) {
         car1.updateMatrixWorld(true); // Ensure matrixWorld is up-to-date
@@ -586,7 +577,7 @@ function animate() {
             }
         }
     }
-
+    
     // Collision Checks
     // Player 1 vs Player 2
     if (car1 && car2 && checkCollision(car1, car2)) {
@@ -628,10 +619,10 @@ function updateBotAI(bot, targetIgnored, dt) { // target parameter is now effect
 
     const directionToTarget = new THREE.Vector3().subVectors(currentTargetPos, bot.position);
     const distanceToTarget = directionToTarget.length();
-
+    
     // Normalize AFTER getting length
     if (distanceToTarget > 0.001) { // Avoid normalizing zero vector
-        directionToTarget.normalize();
+        directionToTarget.normalize(); 
     } else {
         // Bot is very close or at the target, no specific direction needed, focus on switching waypoint
         bot.userData.turnValue = 0;
@@ -640,11 +631,11 @@ function updateBotAI(bot, targetIgnored, dt) { // target parameter is now effect
     }
 
     const botForward = new THREE.Vector3(0, 0, 1).applyQuaternion(bot.quaternion);
-
+    
     if (distanceToTarget > 0.001) { // Only calculate angle if there's a direction
         let angleToTarget = botForward.angleTo(directionToTarget);
         const cross = new THREE.Vector3().crossVectors(botForward, directionToTarget);
-
+        
         const turnThreshold = 0.1; // Radians, about 5.7 degrees
         if (angleToTarget > turnThreshold) {
             bot.userData.turnValue = (cross.y > 0 ? 1 : -1) * bot.userData.turnSpeed;
@@ -653,7 +644,7 @@ function updateBotAI(bot, targetIgnored, dt) { // target parameter is now effect
         }
 
         // Set acceleration to move towards waypoint
-        bot.userData.accelerationValue = bot.userData.accelerationRate * 0.75;
+        bot.userData.accelerationValue = bot.userData.accelerationRate * 0.75; 
         // If bot is not well aligned, reduce speed to make turning easier
         if (angleToTarget > Math.PI / 3) { // Wider angle for slowing down during turns
             bot.userData.accelerationValue = bot.userData.accelerationRate * 0.3;
@@ -728,7 +719,7 @@ function checkOBBCollision(obb1, obb2) {
             }
         }
     }
-
+    
     // In some cases, if axes are parallel, duplicates might be added or near-zero vectors.
     // A more robust SAT might filter these. For now, this is a common approach.
 
@@ -779,7 +770,7 @@ function handleCollision(obj1, obj2) { // Car-car
     }
 
     // Coefficient of restitution (e.g., 0.7 for a reasonably bouncy collision)
-    const e = 0.7;
+    const e = 0.7; 
 
     // Calculate impulse scalar (assuming equal masses for now)
     // j = -(1 + e) * velocityAlongNormal / (1/mass1 + 1/mass2)
@@ -793,7 +784,7 @@ function handleCollision(obj1, obj2) { // Car-car
 
     // Apply impulse to velocities
     const impulseVector = new THREE.Vector3().copy(collisionNormal).multiplyScalar(j);
-
+    
     obj1.userData.velocity.sub(impulseVector); // obj1 moves in negative impulse direction
     obj2.userData.velocity.add(impulseVector); // obj2 moves in positive impulse direction
     obj1.userData.velocity.y = 0;
@@ -803,7 +794,7 @@ function handleCollision(obj1, obj2) { // Car-car
     // This is a simple way to prevent sinking. A more robust method would use penetration depth from SAT.
     const penetrationDepthThreshold = 0.02; // How much overlap to start correcting
     const correctionFactor = 0.3; // How much of the overlap to correct per frame (0 to 1)
-
+    
     // We need a measure of penetration. OBB intersection can give this, but it's complex.
     // For now, a simpler positional correction based on pushing them apart slightly if they are very close AFTER OBB detects collision.
     // Let's use the current distance and compare to sum of approximate radii (half-depths).
@@ -821,7 +812,7 @@ function handleCollision(obj1, obj2) { // Car-car
         obj1.position.y = 0.3;
         obj2.position.y = 0.3;
     }
-
+    
     // console.log("Collision handled with velocity change.");
 
     let collisionScoredThisImpact = false;
@@ -829,7 +820,7 @@ function handleCollision(obj1, obj2) { // Car-car
 
     // Iterate through zones of obj1 and obj2 to find specific interactions
     // It's important that zone OBBs are up-to-date (done in animate loop)
-
+    
     const zones1 = obj1.children.filter(c => c.name && c.name.endsWith("Zone") && c.userData.obb);
     const zones2 = obj2.children.filter(c => c.name && c.name.endsWith("Zone") && c.userData.obb);
 
@@ -849,7 +840,7 @@ function handleCollision(obj1, obj2) { // Car-car
                     scoreChanged = true;
                     collisionScoredThisImpact = true;
                     // console.log(`${obj1.name} front-hit ${obj2.name} side`);
-                    break;
+                    break; 
                 }
 
                 // obj2 attacking obj1 (symmetric checks)
@@ -859,7 +850,7 @@ function handleCollision(obj1, obj2) { // Car-car
                     scoreChanged = true;
                     collisionScoredThisImpact = true;
                     // console.log(`${obj2.name} front-hit ${obj1.name} rear`);
-                    break;
+                    break; 
                 } else if (zone2.name === "frontZone" && (zone1.name === "leftSideZone" || zone1.name === "rightSideZone")) {
                     if (obj2.userData && typeof obj2.userData.score !== 'undefined') obj2.userData.score += 2;
                     scoreChanged = true;
@@ -867,7 +858,7 @@ function handleCollision(obj1, obj2) { // Car-car
                     // console.log(`${obj2.name} front-hit ${obj1.name} side`);
                     break;
                 }
-
+                
                 // Head-on collision (frontZone vs frontZone)
                 if (zone1.name === "frontZone" && zone2.name === "frontZone") {
                     if (obj1.userData && typeof obj1.userData.score !== 'undefined') obj1.userData.score += 1;
@@ -879,7 +870,7 @@ function handleCollision(obj1, obj2) { // Car-car
                 }
             }
         }
-        if (collisionScoredThisImpact) break;
+        if (collisionScoredThisImpact) break; 
     }
 
     if (scoreChanged) {
@@ -931,9 +922,9 @@ function handleCarWallCollision(car, wall) {
 
     // Vector from wall center to car center, in world space
     const relativePosWorld = new THREE.Vector3().subVectors(carPos, wallPos);
-
+    
     let collisionNormal = new THREE.Vector3();
-
+    
     const penetrationX = Math.abs(relativePosWorld.x) / wallHalfWidth;
     const penetrationZ = Math.abs(relativePosWorld.z) / wallHalfDepth;
 
@@ -958,10 +949,10 @@ function handleCarWallCollision(car, wall) {
     }
 
     // --- New Positional Correction using Overlap ---
-    const carVertices = getOBBVertices(car.userData.obb);
-    const wallVertices = getOBBVertices(wall.userData.obb);
+    const carVertices = getOBBVertices(car.userData.obb); 
+    const wallVertices = getOBBVertices(wall.userData.obb); 
 
-    const projCar = projectOntoAxis(carVertices, collisionNormal);
+    const projCar = projectOntoAxis(carVertices, collisionNormal); 
     const projWall = projectOntoAxis(wallVertices, collisionNormal);
 
     // CollisionNormal points from wall towards the car.
@@ -976,35 +967,16 @@ function handleCarWallCollision(car, wall) {
     if (overlap > epsilon) {
         car.position.addScaledVector(collisionNormal, overlap + buffer);
     }
-
+    
     if (typeof car.userData.score !== 'undefined') {
         car.userData.score -= 1; // Penalty for hitting a wall
         updateScoreDisplay();
     }
-    triggerHitEffect(car);
-
+    triggerHitEffect(car); 
+                                                            
     car.position.y = 0.3; // This was already here and is correctly placed.
 }
 
-// (The updateCamera function is already under UI, CAMERA & VISUAL EFFECTS)
-// function updateCamera(dt) {
-// ...
-// }
-
-// --- PLAYER INPUT ---
-// (Event listeners are usually in init or global scope, let's assume they are implicitly covered by init or here if global)
-// document.addEventListener('keydown', ...); // Example, actual listeners are in init()
-// document.addEventListener('keyup', ...);   // Example, actual listeners are in init()
-
-// --- PHYSICS & MOVEMENT ---
-// (applyCarPhysics is here, though it could be argued it's also part of car logic)
-// function applyCarPhysics(car, dt) {
-// ...
-// }
-// (handlePlayerInput is also here, though it's primarily input, it directly affects physics values)
-// function handlePlayerInput() {
-// ...
-// }
 
 
 // --- MAIN EXECUTION ---
@@ -1015,14 +987,15 @@ window.onload = () => {
 };
 
 // --- PHYSICS & MOVEMENT --- (Re-locating applyCarPhysics and handlePlayerInput here for better grouping)
-function applyCarPhysics(car, dt) { // Moved definition to be grouped with other physics/movement
+function applyCarPhysics00(car, dt) { // Moved definition to be grouped with other physics/movement
+	console.log(`[applyCarPhysics] Entry for ${car.name || 'UnnamedCar'}. DT: ${dt.toFixed(4)}, Vel: (${car.userData.velocity.x.toFixed(2)},${car.userData.velocity.y.toFixed(2)},${car.userData.velocity.z.toFixed(2)})`);
     if (!car || dt === 0) return; // Don't do physics if car doesn't exist or time hasn't passed
 
     // Rotation
     car.rotateY(car.userData.turnValue * dt);
 
     // Get car's forward direction vector
-    const localForward = new THREE.Vector3(0, 0, 1);
+    const localForward = new THREE.Vector3(0, 0, 1); 
     const worldForward = localForward.applyQuaternion(car.quaternion);
 
     // Acceleration
@@ -1032,11 +1005,11 @@ function applyCarPhysics(car, dt) { // Moved definition to be grouped with other
     car.userData.velocity.y = 0; // Ensure no vertical velocity accumulation
 
     // Linear Damping (Friction)
-    if (Math.abs(car.userData.accelerationValue) < 0.01) {
+    if (Math.abs(car.userData.accelerationValue) < 0.01) { 
         const dampingFactor = Math.max(0, 1.0 - car.userData.linearDamping * dt);
         car.userData.velocity.multiplyScalar(dampingFactor);
     }
-
+    
     if (car.userData.velocity.lengthSq() < 0.001) {
         car.userData.velocity.set(0,0,0);
     }
@@ -1049,7 +1022,7 @@ function applyCarPhysics(car, dt) { // Moved definition to be grouped with other
 
     // Update Position
     car.position.addScaledVector(car.userData.velocity, dt);
-    car.position.y = 0.3;
+    car.position.y = 0.3; 
 }
 
 // --- PLAYER INPUT --- (Re-locating handlePlayerInput here)
@@ -1098,7 +1071,7 @@ function updateCamera(dt) { // Definition was here, confirming its location
         // Ensure car1's world matrix is up-to-date before using localToWorld
         // This is crucial if car1's transform changed in the same frame before this function.
         // applyCarPhysics updates position/rotation, but matrixWorld might not be rebuilt yet.
-        car1.updateMatrixWorld(true);
+        car1.updateMatrixWorld(true); 
 
         const cameraOffset = new THREE.Vector3(0, 0.7, -1.8); // x, y (height from car center), z (distance behind)
                                                              // Car body center is at y=0.3. Sphere height is 0.6.
@@ -1109,14 +1082,14 @@ function updateCamera(dt) { // Definition was here, confirming its location
         const lookAtWorldPosition = car1.localToWorld(lookAtOffset.clone());
 
         // --- Debugging Step: Try direct copy first ---
-        camera.position.copy(cameraWorldPosition);
+        camera.position.copy(cameraWorldPosition); 
         // If direct copy works, then the lerp was the issue.
         // We can then reinstate lerp with a potentially adjusted factor or ensure dt is not problematic.
         // For example, a more stable lerp:
         // const lerpFactor = Math.min(15 * dt, 1.0); // Ensure factor doesn't exceed 1.0
-        // camera.position.lerp(cameraWorldPosition, lerpFactor);
-
-        camera.lookAt(lookAtWorldPosition);
+        // camera.position.lerp(cameraWorldPosition, lerpFactor); 
+        
+        camera.lookAt(lookAtWorldPosition); 
 
     } else if (!isFirstPersonView) {
         camera.position.copy(defaultCameraPosition);
