@@ -14,7 +14,7 @@ const walls = [];
 
 // Camera state variables & defaults
 let isFirstPersonView = false;
-const defaultCameraPosition = new THREE.Vector3(0, 25, 18);
+const defaultCameraPosition = new THREE.Vector3(0, 22, 15);
 const defaultCameraLookAt = new THREE.Vector3(0, 0, 0);
 
 
@@ -38,9 +38,9 @@ function createBumperCar(color) {
     // UserData properties
     car.userData.velocity = new THREE.Vector3(0, 0, 0);
     car.userData.accelerationValue = 0;
-    car.userData.accelerationRate = 3.0;
-    car.userData.linearDamping = 1.5;
-    car.userData.maxSpeed = 20.0;    // m/s
+    car.userData.accelerationRate = 12.0; // m/s^2
+    car.userData.linearDamping = 1.2;
+    car.userData.maxSpeed = 35.0;    // m/s
     car.userData.turnValue = 0;
     car.userData.turnSpeed = 2.0;
     car.userData.score = 0;
@@ -112,7 +112,6 @@ function createBumperCar(color) {
     car.userData.accelerationValue = 0; // Renamed from 'acceleration' to avoid conflict with a potential vector
     car.userData.accelerationRate = 3.0; // m/s^2
     car.userData.linearDamping = 1.5; // How quickly it slows down. Higher = quicker stop.
-    car.userData.maxSpeed = 3.0;    // m/s
     car.userData.turnValue = 0;      // Renamed from 'turnRate'
     // Collision Zones Setup
     const zoneMaterial = new THREE.MeshStandardMaterial({
@@ -1001,13 +1000,27 @@ function handlePlayerInput() { // Moved definition
 // --- UI, CAMERA & VISUAL EFFECTS --- (updateCamera was here, it's fine)
 function updateCamera(dt) { // Definition was here, confirming its location
     if (isFirstPersonView && car1) {
-        const cameraOffset = new THREE.Vector3(0, 0.7, -1.8);
-        const lookAtOffset = new THREE.Vector3(0, 0.4, 5.0);
+        // Ensure car1's world matrix is up-to-date before using localToWorld
+        // This is crucial if car1's transform changed in the same frame before this function.
+        // applyCarPhysics updates position/rotation, but matrixWorld might not be rebuilt yet.
+        car1.updateMatrixWorld(true);
+
+        const cameraOffset = new THREE.Vector3(0, 0.7, -1.8); // x, y (height from car center), z (distance behind)
+                                                             // Car body center is at y=0.3. Sphere height is 0.6.
+                                                             // So y=0.7 for offset means camera is 0.4 above car's center.
+        const lookAtOffset = new THREE.Vector3(0, 0.4, 5.0);  // Point to look at, in front of car, y relative to car center.
 
         const cameraWorldPosition = car1.localToWorld(cameraOffset.clone());
         const lookAtWorldPosition = car1.localToWorld(lookAtOffset.clone());
 
-        camera.position.lerp(cameraWorldPosition, 15 * dt);
+        // --- Debugging Step: Try direct copy first ---
+        camera.position.copy(cameraWorldPosition);
+        // If direct copy works, then the lerp was the issue.
+        // We can then reinstate lerp with a potentially adjusted factor or ensure dt is not problematic.
+        // For example, a more stable lerp:
+        // const lerpFactor = Math.min(15 * dt, 1.0); // Ensure factor doesn't exceed 1.0
+        // camera.position.lerp(cameraWorldPosition, lerpFactor);
+
         camera.lookAt(lookAtWorldPosition);
 
     } else if (!isFirstPersonView) {
