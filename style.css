@@ -1,0 +1,15 @@
+/* Basic styling for the game page */
+body {
+    margin: 0;
+    overflow: hidden; /* Hide scrollbars */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #f0f0f0; /* Light gray background */
+}
+
+canvas {
+    display: block;
+    border: 1px solid black; /* For debugging canvas boundaries */
+}
