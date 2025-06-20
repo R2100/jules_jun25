@@ -1,3 +1,4 @@
+// --- CONFIG & GLOBALS ---
 // Basic Three.js setup
 let scene, camera, renderer;
 let gameCanvas;
@@ -9,8 +10,15 @@ let deltaTime = 0;
 let lastTime = performance.now();
 const botCars = [];
 const NUM_BOTS = 2;
-const walls = []; // Add this at the top with other global variables
+const walls = [];
 
+// Camera state variables & defaults
+let isFirstPersonView = false;
+const defaultCameraPosition = new THREE.Vector3(0, 5, 10);
+const defaultCameraLookAt = new THREE.Vector3(0, 0, 0);
+
+
+// --- SCENE & OBJECT CREATION ---
 function createBumperCar(color) {
     const car = new THREE.Group();
 
@@ -26,6 +34,19 @@ function createBumperCar(color) {
     body.scale.set(0.8, 0.6, 1.2);
     body.position.y = 0.3; // Adjust Y position based on new height (0.6 * 0.5 radius = 0.3)
     car.add(body);
+
+    // UserData properties
+    car.userData.velocity = new THREE.Vector3(0, 0, 0);
+    car.userData.accelerationValue = 0;
+    car.userData.accelerationRate = 3.0;
+    car.userData.linearDamping = 1.5;
+    car.userData.maxSpeed = 3.0;
+    car.userData.turnValue = 0;
+    car.userData.turnSpeed = 2.0;
+    car.userData.score = 0;
+    car.userData.isHit = false;
+    car.userData.hitTimer = 0;
+    car.userData.originalColor = null;
 
     // Bumper (torus) - adjust to fit the oval shape
     // TorusGeometry(radius, tube, radialSegments, tubularSegments)
@@ -93,17 +114,14 @@ function createBumperCar(color) {
     car.userData.linearDamping = 1.5; // How quickly it slows down. Higher = quicker stop.
     car.userData.maxSpeed = 3.0;    // m/s
     car.userData.turnValue = 0;      // Renamed from 'turnRate'
-    car.userData.turnSpeed = 2.0;   // radians/s
-    car.userData.score = 0;
-
     // Collision Zones Setup
     const zoneMaterial = new THREE.MeshStandardMaterial({
-        color: 0x00ff00, // Green for debugging, will be made invisible
+        color: 0x00ff00, // Keep a distinct color like green for zones
         transparent: true,
-        opacity: 0.2, // For debugging, set to 0 for production
-        visible: false // Set to true for debugging zone positions
+        opacity: 0.25,    // Make them translucent
+        visible: true     // Make them visible
     });
-    if (zoneMaterial.opacity === 0.0) zoneMaterial.visible = false; // Ensure invisible if opacity is 0
+    // No need for the conditional visibility check based on opacity if we always want them visible for now.
 
     const carBodyDimensions = { w: 0.8, h: 0.6, l: 1.2 }; // Approx. scaled sphere: x=0.8, y=0.6, z=1.2 (body.scale values * sphere diameter 1)
 
@@ -150,8 +168,8 @@ function createBumperCar(color) {
             box: new THREE.Box3().setFromObject(zone, true), // Local box of the zone itself
             matrix: new THREE.Matrix4() // World matrix, will be updated in animate
         };
-        // If material is set to invisible for production:
-        if (zone.material.opacity < 0.01) zone.material.visible = false;
+        // Ensure the material visibility is respected (it's set to true on zoneMaterial now)
+        // if (zone.material.opacity < 0.01) zone.material.visible = false; // This line should be removed or commented
     }
 
     return car;
@@ -176,6 +194,8 @@ function createWall(width, height, depth, color, position) {
     return wall;
 }
 
+
+// --- INITIALIZATION (init) ---
 function init() {
     // Get the canvas element
     gameCanvas = document.getElementById('gameCanvas');
@@ -200,6 +220,24 @@ function init() {
     scene.add(ground);
 
     // Create Boundary Walls
+    // defaultCameraPosition.copy(camera.position); // Already set globally
+    // defaultCameraLookAt.copy(scene.position);   // Already set globally
+
+    const toggleButton = document.getElementById('toggleCameraBtn');
+    if (toggleButton) {
+        toggleButton.addEventListener('click', () => {
+            isFirstPersonView = !isFirstPersonView;
+            if (!isFirstPersonView) {
+                // When switching back to default view, reset camera immediately
+                camera.position.copy(defaultCameraPosition);
+                camera.lookAt(defaultCameraLookAt);
+            }
+            // No need to explicitly set first-person camera here, animate loop will handle it.
+        });
+    } else {
+        console.warn("Toggle Camera button not found.");
+    }
+
     const wallHeight = 1;
     const wallThickness = 0.5;
     const wallColor = 0x666666; // Darker gray
@@ -335,6 +373,8 @@ function applyCarPhysics(car, dt) {
     const effectiveAcceleration = worldForward.multiplyScalar(car.userData.accelerationValue);
     car.userData.velocity.addScaledVector(effectiveAcceleration, dt);
 
+    car.userData.velocity.y = 0; // Ensure no vertical velocity accumulation
+
     // Linear Damping (Friction)
     if (Math.abs(car.userData.accelerationValue) < 0.01) { // Only apply damping if not actively accelerating/braking
         const dampingFactor = Math.max(0, 1.0 - car.userData.linearDamping * dt);
@@ -351,10 +391,53 @@ function applyCarPhysics(car, dt) {
         car.userData.velocity.setLength(car.userData.maxSpeed);
     }
 
+    // Ensure Y velocity is still zero before position update (belt and suspenders)
+    car.userData.velocity.y = 0;
+
     // Update Position
     car.position.addScaledVector(car.userData.velocity, dt);
+    car.position.y = 0.3; // Hard clamp Y position
 }
 
+
+// --- UI, CAMERA & VISUAL EFFECTS ---
+function updateVisualEffects(dt) {
+    const allCars = [car1, car2, ...botCars].filter(c => c && c.userData.isHit); // Process only cars that are hit
+
+    for (const car of allCars) {
+        if (car.userData.hitTimer > 0) {
+            car.userData.hitTimer -= dt;
+            if (car.userData.hitTimer <= 0) {
+                car.userData.isHit = false;
+                car.userData.hitTimer = 0;
+                const carBodyMesh = car.getObjectByName("carBodySphere");
+                if (carBodyMesh && car.userData.originalColor !== null) {
+                    carBodyMesh.material.color.setHex(car.userData.originalColor);
+                    car.userData.originalColor = null; // Clear stored color
+                }
+            }
+        }
+    }
+}
+
+function triggerHitEffect(targetCar) {
+    if (!targetCar || !targetCar.userData) return;
+
+    const carBodyMesh = targetCar.getObjectByName("carBodySphere");
+    if (!carBodyMesh) return;
+
+    // Store original color only if not already flashing (or if originalColor is not set yet)
+    if (!targetCar.userData.isHit || targetCar.userData.originalColor === null) {
+        targetCar.userData.originalColor = carBodyMesh.material.color.getHex();
+    }
+
+    targetCar.userData.isHit = true;
+    targetCar.userData.hitTimer = 0.25; // Flash duration in seconds
+    carBodyMesh.material.color.setHex(0xffffff); // Flash white
+}
+
+
+// --- CORE GAME LOOP (animate) ---
 function animate() {
     requestAnimationFrame(animate);
 
@@ -373,6 +456,10 @@ function animate() {
         if (car1) updateBotAI(bot, car1, deltaTime); // Bots target car1
         applyCarPhysics(bot, deltaTime);
     }
+
+    updateVisualEffects(deltaTime);
+
+    updateCamera(deltaTime); // Add this call
 
     // Update OBB matrices for cars
     if (car1) {
@@ -438,6 +525,8 @@ function animate() {
     renderer.render(scene, camera);
 }
 
+
+// --- BOT AI ---
 function updateBotAI(bot, target, dt) {
     if (!bot || !target || dt === 0) return;
 
@@ -484,6 +573,8 @@ function updateBotAI(bot, target, dt) {
     }
 }
 
+
+// --- COLLISION DETECTION ---
 // Helper function to get OBB vertices in world space
 function getOBBVertices(obb) {
     const vertices = [];
@@ -570,7 +661,9 @@ function checkCollision(obj1, obj2) {
     return false;
 }
 
-function handleCollision(obj1, obj2) {
+
+// --- COLLISION HANDLING ---
+function handleCollision(obj1, obj2) { // Car-car
     if (!obj1.userData.velocity || !obj2.userData.velocity) {
         console.warn("Attempting collision with objects lacking velocity data.");
         return;
@@ -608,6 +701,8 @@ function handleCollision(obj1, obj2) {
 
     obj1.userData.velocity.sub(impulseVector); // obj1 moves in negative impulse direction
     obj2.userData.velocity.add(impulseVector); // obj2 moves in positive impulse direction
+    obj1.userData.velocity.y = 0;
+    obj2.userData.velocity.y = 0;
 
     // Positional Correction (Anti-Penetration)
     // This is a simple way to prevent sinking. A more robust method would use penetration depth from SAT.
@@ -628,19 +723,76 @@ function handleCollision(obj1, obj2) {
         const correctionVector = collisionNormal.multiplyScalar(correctionAmount);
         obj1.position.sub(correctionVector.clone().multiplyScalar(0.5));
         obj2.position.add(correctionVector.clone().multiplyScalar(0.5));
+        obj1.position.y = 0.3;
+        obj2.position.y = 0.3;
     }
 
     // console.log("Collision handled with velocity change.");
 
-    // Scoring: Ensure this part is only for car-car, not car-wall
-    if (obj1.userData && typeof obj1.userData.score !== 'undefined' &&
-        obj2.userData && typeof obj2.userData.score !== 'undefined') {
+    let collisionScoredThisImpact = false;
+    let scoreChanged = false; // To track if updateScoreDisplay is needed
 
-        obj1.userData.score += 1;
-        obj2.userData.score += 1;
-        // console.log(`${obj1.name} collided with ${obj2.name}`);
+    // Iterate through zones of obj1 and obj2 to find specific interactions
+    // It's important that zone OBBs are up-to-date (done in animate loop)
+
+    const zones1 = obj1.children.filter(c => c.name && c.name.endsWith("Zone") && c.userData.obb);
+    const zones2 = obj2.children.filter(c => c.name && c.name.endsWith("Zone") && c.userData.obb);
+
+    for (const zone1 of zones1) {
+        for (const zone2 of zones2) {
+            if (checkOBBCollision(zone1.userData.obb, zone2.userData.obb)) {
+                // obj1 attacking obj2
+                if (zone1.name === "frontZone" && zone2.name === "rearZone") {
+                    if (obj1.userData && typeof obj1.userData.score !== 'undefined') obj1.userData.score += 3;
+                    if (obj2.userData && typeof obj2.userData.score !== 'undefined') obj2.userData.score -= 1;
+                    scoreChanged = true;
+                    collisionScoredThisImpact = true;
+                    // console.log(`${obj1.name} front-hit ${obj2.name} rear`);
+                    break; // Prioritize this hit for obj1
+                } else if (zone1.name === "frontZone" && (zone2.name === "leftSideZone" || zone2.name === "rightSideZone")) {
+                    if (obj1.userData && typeof obj1.userData.score !== 'undefined') obj1.userData.score += 2;
+                    scoreChanged = true;
+                    collisionScoredThisImpact = true;
+                    // console.log(`${obj1.name} front-hit ${obj2.name} side`);
+                    break;
+                }
+
+                // obj2 attacking obj1 (symmetric checks)
+                if (zone2.name === "frontZone" && zone1.name === "rearZone") {
+                    if (obj2.userData && typeof obj2.userData.score !== 'undefined') obj2.userData.score += 3;
+                    if (obj1.userData && typeof obj1.userData.score !== 'undefined') obj1.userData.score -= 1;
+                    scoreChanged = true;
+                    collisionScoredThisImpact = true;
+                    // console.log(`${obj2.name} front-hit ${obj1.name} rear`);
+                    break;
+                } else if (zone2.name === "frontZone" && (zone1.name === "leftSideZone" || zone1.name === "rightSideZone")) {
+                    if (obj2.userData && typeof obj2.userData.score !== 'undefined') obj2.userData.score += 2;
+                    scoreChanged = true;
+                    collisionScoredThisImpact = true;
+                    // console.log(`${obj2.name} front-hit ${obj1.name} side`);
+                    break;
+                }
+
+                // Head-on collision (frontZone vs frontZone)
+                if (zone1.name === "frontZone" && zone2.name === "frontZone") {
+                    if (obj1.userData && typeof obj1.userData.score !== 'undefined') obj1.userData.score += 1;
+                    if (obj2.userData && typeof obj2.userData.score !== 'undefined') obj2.userData.score += 1;
+                    scoreChanged = true;
+                    collisionScoredThisImpact = true;
+                    // console.log(`Head-on: ${obj1.name} and ${obj2.name}`);
+                    break;
+                }
+            }
+        }
+        if (collisionScoredThisImpact) break;
+    }
+
+    if (scoreChanged) {
         updateScoreDisplay();
     }
+
+    triggerHitEffect(obj1);
+    triggerHitEffect(obj2);
 }
 
 function updateScoreDisplay() {
@@ -694,17 +846,142 @@ function handleCarWallCollision(car, wall) {
 
     if (vDotN < 0) { // Check if car is moving towards the wall along this normal
         v.sub(collisionNormal.clone().multiplyScalar((1 + restitution) * vDotN));
+        car.userData.velocity.y = 0;
     }
 
     // --- Positional Correction ---
     const pushOutDistance = 0.05;
     car.position.addScaledVector(collisionNormal, pushOutDistance);
 
-    car.position.y = 0.3;
+    if (typeof car.userData.score !== 'undefined') {
+        car.userData.score -= 1; // Penalty for hitting a wall
+        updateScoreDisplay();
+    }
+    triggerHitEffect(car);
+
+    car.position.y = 0.3; // This was already here and is correctly placed.
 }
 
+// (The updateCamera function is already under UI, CAMERA & VISUAL EFFECTS)
+// function updateCamera(dt) {
+// ...
+// }
+
+// --- PLAYER INPUT ---
+// (Event listeners are usually in init or global scope, let's assume they are implicitly covered by init or here if global)
+// document.addEventListener('keydown', ...); // Example, actual listeners are in init()
+// document.addEventListener('keyup', ...);   // Example, actual listeners are in init()
+
+// --- PHYSICS & MOVEMENT ---
+// (applyCarPhysics is here, though it could be argued it's also part of car logic)
+// function applyCarPhysics(car, dt) {
+// ...
+// }
+// (handlePlayerInput is also here, though it's primarily input, it directly affects physics values)
+// function handlePlayerInput() {
+// ...
+// }
+
+
+// --- MAIN EXECUTION ---
 // Initialize the game when the window loads
 window.onload = () => {
     init();
     updateScoreDisplay(); // Initial score display
 };
+
+// --- PHYSICS & MOVEMENT --- (Re-locating applyCarPhysics and handlePlayerInput here for better grouping)
+function applyCarPhysics(car, dt) { // Moved definition to be grouped with other physics/movement
+    if (!car || dt === 0) return; // Don't do physics if car doesn't exist or time hasn't passed
+
+    // Rotation
+    car.rotateY(car.userData.turnValue * dt);
+
+    // Get car's forward direction vector
+    const localForward = new THREE.Vector3(0, 0, 1);
+    const worldForward = localForward.applyQuaternion(car.quaternion);
+
+    // Acceleration
+    const effectiveAcceleration = worldForward.multiplyScalar(car.userData.accelerationValue);
+    car.userData.velocity.addScaledVector(effectiveAcceleration, dt);
+
+    car.userData.velocity.y = 0; // Ensure no vertical velocity accumulation
+
+    // Linear Damping (Friction)
+    if (Math.abs(car.userData.accelerationValue) < 0.01) {
+        const dampingFactor = Math.max(0, 1.0 - car.userData.linearDamping * dt);
+        car.userData.velocity.multiplyScalar(dampingFactor);
+    }
+
+    if (car.userData.velocity.lengthSq() < 0.001) {
+        car.userData.velocity.set(0,0,0);
+    }
+
+    if (car.userData.velocity.lengthSq() > car.userData.maxSpeed * car.userData.maxSpeed) {
+        car.userData.velocity.setLength(car.userData.maxSpeed);
+    }
+
+    car.userData.velocity.y = 0;
+
+    // Update Position
+    car.position.addScaledVector(car.userData.velocity, dt);
+    car.position.y = 0.3;
+}
+
+// --- PLAYER INPUT --- (Re-locating handlePlayerInput here)
+function handlePlayerInput() { // Moved definition
+    if (!car1 || !car2) return;
+
+    // Car 1 (Arrows)
+    if (keysPressed['arrowup']) {
+        car1.userData.accelerationValue = car1.userData.accelerationRate;
+    } else if (keysPressed['arrowdown']) {
+        car1.userData.accelerationValue = -car1.userData.accelerationRate;
+    } else {
+        car1.userData.accelerationValue = 0;
+    }
+
+    if (keysPressed['arrowleft']) {
+        car1.userData.turnValue = car1.userData.turnSpeed;
+    } else if (keysPressed['arrowright']) {
+        car1.userData.turnValue = -car1.userData.turnSpeed;
+    } else {
+        car1.userData.turnValue = 0;
+    }
+
+    // Car 2 (WASD)
+    if (keysPressed['w']) {
+        car2.userData.accelerationValue = car2.userData.accelerationRate;
+    } else if (keysPressed['s']) {
+        car2.userData.accelerationValue = -car2.userData.accelerationRate;
+    } else {
+        car2.userData.accelerationValue = 0;
+    }
+
+    if (keysPressed['a']) {
+        car2.userData.turnValue = car2.userData.turnSpeed;
+    } else if (keysPressed['d']) {
+        car2.userData.turnValue = -car2.userData.turnSpeed;
+    } else {
+        car2.userData.turnValue = 0;
+    }
+}
+
+
+// --- UI, CAMERA & VISUAL EFFECTS --- (updateCamera was here, it's fine)
+function updateCamera(dt) { // Definition was here, confirming its location
+    if (isFirstPersonView && car1) {
+        const cameraOffset = new THREE.Vector3(0, 0.7, -1.8);
+        const lookAtOffset = new THREE.Vector3(0, 0.4, 5.0);
+
+        const cameraWorldPosition = car1.localToWorld(cameraOffset.clone());
+        const lookAtWorldPosition = car1.localToWorld(lookAtOffset.clone());
+
+        camera.position.lerp(cameraWorldPosition, 15 * dt);
+        camera.lookAt(lookAtWorldPosition);
+
+    } else if (!isFirstPersonView) {
+        camera.position.copy(defaultCameraPosition);
+        camera.lookAt(defaultCameraLookAt);
+    }
+}
