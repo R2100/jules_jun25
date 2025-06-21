@@ -473,7 +473,7 @@ function handleCollision(car1, car2) { // Car-car (Simplified)
     car1.velocity.x -= impulse * normalX;
     car1.velocity.z -= impulse * normalZ;
     car2.velocity.x += impulse * normalX;
-    car.velocity.z += impulse * normalZ;
+    car2.velocity.z += impulse * normalZ; // Corrected: car to car2
 
     // Basic scoring: if one car is significantly faster, it's the attacker
     const speed1 = Math.sqrt(car1.velocity.x**2 + car1.velocity.z**2);
