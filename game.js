@@ -1,5 +1,6 @@
 // --- CONFIG & GLOBALS ---
 const GAME_VERSION = "1.0.5";
+const SERVER_TICK_RATE = 30; // Server updates per second
 
 // Socket.io setup
 const socket = io();
@@ -36,53 +37,65 @@ function processGameState(gameStateData) {
     for (const entityId in allServerEntities) {
         serverEntityIds.add(entityId);
         const entityState = allServerEntities[entityId];
-        let localEntity = gameEntities[entityId];
+        let entityData = gameEntities[entityId];
 
-        if (!localEntity) { // Entity doesn't exist locally, create it
+        if (!entityData) { // Entity doesn't exist locally, create it
             console.log('New entity from game state:', entityState.name, entityId);
-            let color = 0x00ff00; // Default green for new entities not immediately classified
-            if (gameStateData.players[entityId]) { // It's a player
-                color = (entityId === myPlayerId) ? 0xff0000 : 0x0000ff; // Red for self, blue for other players
-            } else if (gameStateData.bots[entityId]) { // It's a bot
-                color = 0xffff00; // Yellow for bots
+            let color = 0x00ff00;
+            if (gameStateData.players[entityId]) {
+                color = (entityId === myPlayerId) ? 0xff0000 : 0x0000ff;
+            } else if (gameStateData.bots[entityId]) {
+                color = 0xffff00;
             }
 
-            localEntity = createBumperCar(color);
-            localEntity.name = entityState.name;
-            if(scene) scene.add(localEntity); else console.error("Scene not ready for new entity:", entityState.name);
-            gameEntities[entityId] = localEntity;
+            const newMesh = createBumperCar(color);
+            newMesh.name = entityState.name;
+            if(scene) scene.add(newMesh); else console.error("Scene not ready for new entity:", entityState.name);
+
+            gameEntities[entityId] = {
+                mesh: newMesh,
+                previousState: null, // Will be populated on first update after creation
+                currentState: { ...entityState }, // Store initial state
+                lastUpdateTime: Date.now()
+            };
+            entityData = gameEntities[entityId]; // Assign for current tick processing
+
 
             if (entityId === myPlayerId) {
-                car1 = localEntity; // Assign the main player car reference
+                car1 = newMesh;
             }
+             // Snap to initial position and rotation directly
+            entityData.mesh.position.set(entityState.x, entityState.y, entityState.z);
+            entityData.mesh.rotation.y = entityState.rotationY;
+            if(entityData.mesh.userData) entityData.mesh.userData.score = entityState.score;
+
+
+        } else { // Entity exists, update its state history for interpolation
+            entityData.previousState = { ...entityData.currentState };
+            entityData.currentState = { ...entityState };
+            entityData.lastUpdateTime = Date.now();
         }
 
-        // Update entity state
-        if(localEntity) { // Ensure localEntity was created successfully
-            localEntity.position.set(entityState.x, entityState.y, entityState.z);
-            localEntity.rotation.y = entityState.rotationY; // Ensure this is just the Y-axis rotation scalar
+        // Update score directly on mesh.userData for simplicity in updateScoreDisplay
+        // This could also read from entityData.currentState.score
+        if (entityData && entityData.mesh.userData) {
+            entityData.mesh.userData.score = entityState.score;
+        }
 
-            if (localEntity.userData) {
-                localEntity.userData.score = entityState.score;
-                // Check if isHit state changed from false to true to trigger the effect
-                if (entityState.isHit && !localEntity.userData.isHitTriggered) {
-                    triggerHitEffect(localEntity);
-                    localEntity.userData.isHitTriggered = true; // Mark that we've started the visual effect
-                } else if (!entityState.isHit) {
-                    localEntity.userData.isHitTriggered = false; // Reset if server says not hit anymore
-                }
-                // The actual 'isHit' for visuals is managed by triggerHitEffect's internal timer
-            } else {
-                console.warn('Local entity missing userData:', entityId);
-            }
+        // Visual hit effect based on server's isHit flag
+        if (entityData && entityState.isHit && !entityData.mesh.userData.isHitTriggered) {
+            triggerHitEffect(entityData.mesh);
+            entityData.mesh.userData.isHitTriggered = true;
+        } else if (entityData && !entityState.isHit) {
+            entityData.mesh.userData.isHitTriggered = false;
         }
     }
 
     // Identify and remove old entities not present in the current server state
     for (const localId in gameEntities) {
         if (!serverEntityIds.has(localId)) {
-            console.log('Removing stale entity:', localId, gameEntities[localId].name);
-            if(scene) scene.remove(gameEntities[localId]);
+            console.log('Removing stale entity:', localId, gameEntities[localId].mesh.name);
+            if(scene) scene.remove(gameEntities[localId].mesh);
             delete gameEntities[localId];
         }
     }
@@ -94,8 +107,9 @@ socket.on('joinSuccess', (data) => {
     myPlayerId = data.playerId;
     console.log('Successfully joined game! My player ID is:', myPlayerId);
     console.log('Initial game state received:', data.initialGameState);
-    if(scene) { // Ensure scene is ready
-        processGameState(data.initialGameState);
+    // It's crucial that initializeGameScene (which sets up `scene`) is called before this.
+    if(scene) {
+        processGameState(data.initialGameState); // This will now populate gameEntities correctly
     } else {
         // If scene is not ready, queue the initial state or wait.
         // For now, log an error. This implies initializeGameScene might not have completed.
@@ -584,35 +598,60 @@ function animate() {
 
     handlePlayerInput(); // Still call to send inputs to server
 
-    // Client-side physics application is removed for player cars
-    // if (car1) applyCarPhysics(car1, deltaTime);
-    // if (car2) applyCarPhysics(car2, deltaTime); // car2 is removed
+    // Client-side physics application is removed. Server is authoritative.
 
-    // Bot AI and Physics are server-side. Client updates bots based on server state.
-    // for (const bot of botCars) { ... } // Remove local bot processing
+    updateVisualEffects(deltaTime); // Handles client-side visual effects like hit flashing
 
-    updateVisualEffects(deltaTime); 
-
-    updateCamera(deltaTime);
-    
-    // Update OBB matrices for all entities based on server state (or prediction)
-    // This is important if client-side effects or non-authoritative checks still use them.
+    const renderTimestamp = Date.now();
     for (const id in gameEntities) {
         const entity = gameEntities[id];
-        if (entity && entity.userData.obb) {
-            entity.updateMatrixWorld(true);
-            entity.userData.obb.matrix.copy(entity.matrixWorld);
+        if (!entity.mesh) continue; // Skip if mesh isn't defined
 
-            for (const child of entity.children) {
+        if (!entity.previousState) { // No previous state to interpolate from, snap to current
+            entity.mesh.position.set(entity.currentState.x, entity.currentState.y, entity.currentState.z);
+            entity.mesh.rotation.y = entity.currentState.rotationY;
+            continue;
+        }
+
+        const timeSinceLastServerUpdate = renderTimestamp - entity.lastUpdateTime;
+        let interpolationAlpha = timeSinceLastServerUpdate / (1000 / SERVER_TICK_RATE);
+        interpolationAlpha = Math.max(0, Math.min(1, interpolationAlpha)); // Clamp alpha
+
+        // Interpolate Position
+        const prevPos = new THREE.Vector3(entity.previousState.x, entity.previousState.y, entity.previousState.z);
+        const currentPos = new THREE.Vector3(entity.currentState.x, entity.currentState.y, entity.currentState.z);
+        entity.mesh.position.lerpVectors(prevPos, currentPos, interpolationAlpha);
+
+        // Interpolate Rotation (Y-axis with shortest angle)
+        let prevRotY = entity.previousState.rotationY;
+        let currentRotY = entity.currentState.rotationY;
+
+        // Ensure rotations are numbers before proceeding
+        if (typeof prevRotY !== 'number') prevRotY = 0;
+        if (typeof currentRotY !== 'number') currentRotY = 0;
+
+        let deltaRot = (currentRotY - prevRotY);
+        deltaRot = deltaRot % (2 * Math.PI);
+        if (deltaRot > Math.PI) deltaRot -= (2 * Math.PI);
+        if (deltaRot < -Math.PI) deltaRot += (2 * Math.PI);
+        entity.mesh.rotation.y = prevRotY + deltaRot * interpolationAlpha;
+
+        // OBB matrix updates (if still needed for client-side effects/debug)
+        if (entity.mesh.userData && entity.mesh.userData.obb) {
+            entity.mesh.updateMatrixWorld(true);
+            entity.mesh.userData.obb.matrix.copy(entity.mesh.matrixWorld);
+            for (const child of entity.mesh.children) {
                 if (child.name && child.name.endsWith("Zone") && child.userData.obb) {
-                    child.updateMatrixWorld(true); // Ensure child's matrix is also updated
+                    child.updateMatrixWorld(true);
                     child.userData.obb.matrix.copy(child.matrixWorld);
                 }
             }
         }
     }
 
-    // Client-side collision detection and handling should be removed or significantly simplified.
+    updateCamera(deltaTime); // Update camera after entities are interpolated
+
+    // Client-side collision detection and handling are removed.
     // Server will be authoritative.
     // const allCars = Object.values(gameEntities).filter(c => c);
     // for (const car of allCars) {
@@ -623,7 +662,7 @@ function animate() {
     //         }
     //     }
     // }
-    
+
     // Example: Iterating through gameEntities for potential rendering updates or client effects
     // for (const id_A in gameEntities) {
     //     const entity_A = gameEntities[id_A];
@@ -891,8 +930,8 @@ function updateScoreDisplay() {
 
     let playerCount = 0;
     for (const id in gameEntities) {
-        const entity = gameEntities[id];
-        if (entity && typeof entity.userData.score !== 'undefined') {
+        const entityData = gameEntities[id]; // Now an object { mesh, previousState, currentState, ... }
+        if (entityData && entityData.currentState && typeof entityData.currentState.score !== 'undefined') {
             let displayEl;
             if (id === myPlayerId && scoreCar1El) {
                 displayEl = scoreCar1El;
@@ -900,16 +939,16 @@ function updateScoreDisplay() {
                 displayEl = scoreCar2El;
             } else { // Dynamically add for others
                 displayEl = document.createElement('div');
-                displayEl.className = 'player-score-display'; // New class for dynamic scores
+                displayEl.className = 'player-score-display';
                 scoreboardDiv.appendChild(displayEl);
             }
-            if(displayEl) displayEl.textContent = `${entity.name}: ${entity.userData.score}`;
+            if(displayEl) displayEl.textContent = `${entityData.mesh.name}: ${entityData.currentState.score}`; // Use mesh.name and currentState.score
             playerCount++;
         }
     }
     // Hide car2 score if no second player shown in that slot
     if (playerCount < 2 && scoreCar2El) {
-         scoreCar2El.textContent = ""; // Or set display to none
+         scoreCar2El.textContent = "";
     }
 }
 

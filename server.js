@@ -75,7 +75,7 @@ function createServerCar(name, id, isBot = false) {
         obb: { halfSize: { x: 0.7 / 2, y: 0.6 / 2, z: 1.5 / 2 } },
         isBot: isBot, // Flag if it's a bot
         currentWaypointIndex: isBot ? Math.floor(Math.random() * circuitWaypoints.length) : 0, // Bots start at random waypoints
-        target // For bots, could be a player or null
+        target: null // For bots, could be a player or null, initialized to null
     };
 }
 
