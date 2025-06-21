@@ -128,31 +128,58 @@ socket.on('gameStateUpdate', (currentGameState) => {
 });
 
 socket.on('playerJoined', (playerData) => {
-    if (playerData.id === myPlayerId) return; // Don't re-add self
-    if (!gameEntities[playerData.id]) {
-        console.log('Player joined:', playerData.name, playerData);
-        const color = 0x00ff00; // Green for new players joining
-        gameEntities[playerData.id] = createBumperCar(color);
-        gameEntities[playerData.id].position.set(playerData.x, playerData.y, playerData.z);
-        if (playerData.rotationY) gameEntities[playerData.id].rotation.y = playerData.rotationY;
-        else gameEntities[playerData.id].rotation.y = 0;
-        gameEntities[playerData.id].name = playerData.name;
-        gameEntities[playerData.id].userData.score = playerData.score || 0;
+    if (playerData.id === myPlayerId) return;
+
+    // Check if entityData (wrapper) or its mesh already exists to prevent duplication
+    if (!gameEntities[playerData.id] || !gameEntities[playerData.id].mesh) {
+        console.log('Player joined (event):', playerData.name, playerData);
+        const color = 0x00ff00; // Green for new players joining via this event
+
+        const newMesh = createBumperCar(color);
+        newMesh.name = playerData.name;
+        newMesh.position.set(playerData.x, playerData.y, playerData.z);
+        if (playerData.rotationY) newMesh.rotation.y = playerData.rotationY;
+        else newMesh.rotation.y = 0;
+        if(newMesh.userData) newMesh.userData.score = playerData.score || 0;
+
         if (scene) {
-            scene.add(gameEntities[playerData.id]);
+            scene.add(newMesh);
         } else {
-            console.error("Scene not initialized when trying to add new player:", playerData.name);
+            console.error("Scene not initialized when trying to add new player via playerJoined event:", playerData.name);
         }
+
+        // Create the wrapper structure consistent with processGameState
+        gameEntities[playerData.id] = {
+            mesh: newMesh,
+            previousState: null, // Will be properly set by the next gameStateUpdate
+            currentState: { // Initialize from playerData
+                id: playerData.id,
+                name: playerData.name,
+                x: playerData.x,
+                y: playerData.y,
+                z: playerData.z,
+                rotationY: playerData.rotationY || 0,
+                score: playerData.score || 0,
+                isHit: playerData.isHit || false // Assume not hit if not specified
+            },
+            lastUpdateTime: Date.now()
+        };
         updateScoreDisplay();
     }
 });
 
 socket.on('playerLeft', (playerId) => {
-    if (gameEntities[playerId]) {
-        console.log('Player left:', gameEntities[playerId].name);
-        if (scene) scene.remove(gameEntities[playerId]);
+    const entityData = gameEntities[playerId];
+    if (entityData && entityData.mesh) {
+        console.log('Player left (event):', entityData.mesh.name);
+        if (scene) scene.remove(entityData.mesh);
         delete gameEntities[playerId];
-        updateScoreDisplay(); // Update display as player list changed
+        updateScoreDisplay();
+    } else if (gameEntities[playerId]) { // It might be a raw mesh if playerJoined was bugged before
+        console.warn('Player left (event): Removing entity without proper wrapper structure.', playerId);
+        if(scene && gameEntities[playerId].isMesh) scene.remove(gameEntities[playerId]);
+        delete gameEntities[playerId];
+        updateScoreDisplay();
     }
 });
 
@@ -1072,15 +1099,16 @@ function applyCarPhysics00(car, dt) { // Moved definition to be grouped with oth
 // --- PLAYER INPUT --- (Re-locating handlePlayerInput here)
 // --- UI, CAMERA & VISUAL EFFECTS ---
 function updateCamera(dt) {
-    const playerCar = gameEntities[myPlayerId];
-    if (isFirstPersonView && playerCar) {
-        playerCar.updateMatrixWorld(true);
+    const playerEntity = gameEntities[myPlayerId];
+    if (isFirstPersonView && playerEntity && playerEntity.mesh) {
+        const playerCarMesh = playerEntity.mesh;
+        playerCarMesh.updateMatrixWorld(true);
 
         const cameraOffset = new THREE.Vector3(0, 5, -5.8);
         const lookAtOffset = new THREE.Vector3(0, 0.4, 5.0);
 
-        const cameraWorldPosition = playerCar.localToWorld(cameraOffset.clone());
-        const lookAtWorldPosition = playerCar.localToWorld(lookAtOffset.clone());
+        const cameraWorldPosition = playerCarMesh.localToWorld(cameraOffset.clone());
+        const lookAtWorldPosition = playerCarMesh.localToWorld(lookAtOffset.clone());
         
         camera.position.copy(cameraWorldPosition);
         camera.lookAt(lookAtWorldPosition); 
