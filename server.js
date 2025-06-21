@@ -75,7 +75,7 @@ function createServerCar(name, id, isBot = false) {
         obb: { halfSize: { x: 0.7 / 2, y: 0.6 / 2, z: 1.5 / 2 } },
         isBot: isBot, // Flag if it's a bot
         currentWaypointIndex: isBot ? Math.floor(Math.random() * circuitWaypoints.length) : 0, // Bots start at random waypoints
-        target // For bots, could be a player or null
+        target: null // For bots, could be a player or null, initialized to null
     };
 }
 
@@ -300,13 +300,26 @@ function gameLoop() {
     const deltaTime = (now - serverLastTime) / 1000.0; // Delta time in seconds
     serverLastTime = now;
 
+    // Update players
     for (const playerId in players) {
         if (players.hasOwnProperty(playerId)) {
             applyCarPhysics(players[playerId], deltaTime);
         }
     }
 
-    // TODO: Collision detection and handling (AABB for now)
+    // Update bots
+    for (const botId in serverBots) {
+        if (serverBots.hasOwnProperty(botId)) {
+            const bot = serverBots[botId];
+            // Bot AI decides acceleration/turn, then physics updates position/velocity
+            updateBotAI(bot, deltaTime); // Corrected: removed undefined target argument
+            applyCarPhysics(bot, deltaTime);
+        }
+    }
+
+    const allCars = { ...players, ...serverBots };
+
+    // Collision detection and handling
     // Car-Wall Collisions
     for (const carId in allCars) {
         const car = allCars[carId];

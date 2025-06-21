@@ -1,5 +1,6 @@
 // --- CONFIG & GLOBALS ---
 const GAME_VERSION = "1.0.5";
+const SERVER_TICK_RATE = 30; // Server updates per second
 
 // Socket.io setup
 const socket = io();
@@ -16,44 +17,114 @@ socket.on('disconnect', () => {
   console.log('Disconnected from Socket.io server.');
   // Optionally, clear gameEntities or show a disconnected message
   gameEntities = {};
-  // scene.clear(); // Or handle more gracefully
+  if(scene) { // Check if scene exists before clearing
+    // Remove all entities from the scene
+    for (const id in gameEntities) {
+        if (gameEntities.hasOwnProperty(id) && gameEntities[id].isMesh) { // Check if it's a Three.js object
+            scene.remove(gameEntities[id]);
+        }
+    }
+  }
+  gameEntities = {}; // Reset local store
+  myPlayerId = null;
+  // Potentially show a "disconnected" UI element
 });
+
+function processGameState(gameStateData) {
+    const allServerEntities = { ...gameStateData.players, ...gameStateData.bots };
+    const serverEntityIds = new Set();
+
+    for (const entityId in allServerEntities) {
+        serverEntityIds.add(entityId);
+        const entityState = allServerEntities[entityId];
+        let entityData = gameEntities[entityId];
+
+        if (!entityData) { // Entity doesn't exist locally, create it
+            console.log('New entity from game state:', entityState.name, entityId);
+            let color = 0x00ff00;
+            if (gameStateData.players[entityId]) {
+                color = (entityId === myPlayerId) ? 0xff0000 : 0x0000ff;
+            } else if (gameStateData.bots[entityId]) {
+                color = 0xffff00;
+            }
+
+            const newMesh = createBumperCar(color);
+            newMesh.name = entityState.name;
+            if(scene) scene.add(newMesh); else console.error("Scene not ready for new entity:", entityState.name);
+
+            gameEntities[entityId] = {
+                mesh: newMesh,
+                previousState: null, // Will be populated on first update after creation
+                currentState: { ...entityState }, // Store initial state
+                lastUpdateTime: Date.now()
+            };
+            entityData = gameEntities[entityId]; // Assign for current tick processing
+
+
+            if (entityId === myPlayerId) {
+                car1 = newMesh;
+            }
+             // Snap to initial position and rotation directly
+            entityData.mesh.position.set(entityState.x, entityState.y, entityState.z);
+            entityData.mesh.rotation.y = entityState.rotationY;
+            if(entityData.mesh.userData) entityData.mesh.userData.score = entityState.score;
+
+
+        } else { // Entity exists, update its state history for interpolation
+            entityData.previousState = { ...entityData.currentState };
+            entityData.currentState = { ...entityState };
+            entityData.lastUpdateTime = Date.now();
+        }
+
+        // Update score directly on mesh.userData for simplicity in updateScoreDisplay
+        // This could also read from entityData.currentState.score
+        if (entityData && entityData.mesh.userData) {
+            entityData.mesh.userData.score = entityState.score;
+        }
+
+        // Visual hit effect based on server's isHit flag
+        if (entityData && entityState.isHit && !entityData.mesh.userData.isHitTriggered) {
+            triggerHitEffect(entityData.mesh);
+            entityData.mesh.userData.isHitTriggered = true;
+        } else if (entityData && !entityState.isHit) {
+            entityData.mesh.userData.isHitTriggered = false;
+        }
+    }
+
+    // Identify and remove old entities not present in the current server state
+    for (const localId in gameEntities) {
+        if (!serverEntityIds.has(localId)) {
+            console.log('Removing stale entity:', localId, gameEntities[localId].mesh.name);
+            if(scene) scene.remove(gameEntities[localId].mesh);
+            delete gameEntities[localId];
+        }
+    }
+    updateScoreDisplay();
+}
+
 
 socket.on('joinSuccess', (data) => {
     myPlayerId = data.playerId;
     console.log('Successfully joined game! My player ID is:', myPlayerId);
-    console.log('Initial players data:', data.initialPlayers);
+    console.log('Initial game state received:', data.initialGameState);
+    // It's crucial that initializeGameScene (which sets up `scene`) is called before this.
+    if(scene) {
+        processGameState(data.initialGameState); // This will now populate gameEntities correctly
+    } else {
+        // If scene is not ready, queue the initial state or wait.
+        // For now, log an error. This implies initializeGameScene might not have completed.
+        console.error("Scene not initialized at joinSuccess. State processing might be incomplete.");
+        // A robust solution might involve a flag or a queue.
+    }
+    // car1 should be set within processGameState if myPlayerId matches an entity.
+});
 
-    for (const playerId in data.initialPlayers) {
-        if (data.initialPlayers.hasOwnProperty(playerId)) {
-            const playerData = data.initialPlayers[playerId];
-            if (!gameEntities[playerId]) {
-                const color = playerId === myPlayerId ? 0xff0000 : 0x0000ff; // Red for self, blue for others
-                gameEntities[playerId] = createBumperCar(color);
-                gameEntities[playerId].position.set(playerData.x, playerData.y, playerData.z);
-                if (playerData.rotationY) gameEntities[playerId].rotation.y = playerData.rotationY;
-                else gameEntities[playerId].rotation.y = 0; // Ensure rotation is initialized
-                gameEntities[playerId].name = playerData.name;
-                gameEntities[playerId].userData.score = playerData.score || 0; // Ensure score is initialized
-                if (scene) { // Ensure scene is initialized before adding
-                    scene.add(gameEntities[playerId]);
-                    console.log('Added initial player to scene:', playerData.name, 'at', gameEntities[playerId].position);
-                } else {
-                    console.error("Scene not initialized when trying to add initial player:", playerData.name);
-                }
-            }
-        }
+socket.on('gameStateUpdate', (currentGameState) => {
+    if (!myPlayerId || !scene) { // Don't process updates if not fully initialized
+        // console.log("gameStateUpdate received, but client not ready.");
+        return;
     }
-    // If the main player's car (car1) was created before joinSuccess, remove it or reassign.
-    // For simplicity with the new flow, car1 will be gameEntities[myPlayerId]
-    if (car1 && car1.id !== myPlayerId) { // If car1 was a placeholder and not the actual player car
-        if (scene) scene.remove(car1);
-        car1 = null;
-    }
-    if (gameEntities[myPlayerId]) {
-        car1 = gameEntities[myPlayerId]; // Assign car1 to be the player's car from gameEntities
-    }
-    updateScoreDisplay(); // Update scores with initial data
+    processGameState(currentGameState);
 });
 
 socket.on('playerJoined', (playerData) => {
@@ -527,35 +598,60 @@ function animate() {
 
     handlePlayerInput(); // Still call to send inputs to server
 
-    // Client-side physics application is removed for player cars
-    // if (car1) applyCarPhysics(car1, deltaTime);
-    // if (car2) applyCarPhysics(car2, deltaTime); // car2 is removed
+    // Client-side physics application is removed. Server is authoritative.
 
-    // Bot AI and Physics are server-side. Client updates bots based on server state.
-    // for (const bot of botCars) { ... } // Remove local bot processing
+    updateVisualEffects(deltaTime); // Handles client-side visual effects like hit flashing
 
-    updateVisualEffects(deltaTime); 
-
-    updateCamera(deltaTime);
-    
-    // Update OBB matrices for all entities based on server state (or prediction)
-    // This is important if client-side effects or non-authoritative checks still use them.
+    const renderTimestamp = Date.now();
     for (const id in gameEntities) {
         const entity = gameEntities[id];
-        if (entity && entity.userData.obb) {
-            entity.updateMatrixWorld(true);
-            entity.userData.obb.matrix.copy(entity.matrixWorld);
+        if (!entity.mesh) continue; // Skip if mesh isn't defined
 
-            for (const child of entity.children) {
+        if (!entity.previousState) { // No previous state to interpolate from, snap to current
+            entity.mesh.position.set(entity.currentState.x, entity.currentState.y, entity.currentState.z);
+            entity.mesh.rotation.y = entity.currentState.rotationY;
+            continue;
+        }
+
+        const timeSinceLastServerUpdate = renderTimestamp - entity.lastUpdateTime;
+        let interpolationAlpha = timeSinceLastServerUpdate / (1000 / SERVER_TICK_RATE);
+        interpolationAlpha = Math.max(0, Math.min(1, interpolationAlpha)); // Clamp alpha
+
+        // Interpolate Position
+        const prevPos = new THREE.Vector3(entity.previousState.x, entity.previousState.y, entity.previousState.z);
+        const currentPos = new THREE.Vector3(entity.currentState.x, entity.currentState.y, entity.currentState.z);
+        entity.mesh.position.lerpVectors(prevPos, currentPos, interpolationAlpha);
+
+        // Interpolate Rotation (Y-axis with shortest angle)
+        let prevRotY = entity.previousState.rotationY;
+        let currentRotY = entity.currentState.rotationY;
+
+        // Ensure rotations are numbers before proceeding
+        if (typeof prevRotY !== 'number') prevRotY = 0;
+        if (typeof currentRotY !== 'number') currentRotY = 0;
+
+        let deltaRot = (currentRotY - prevRotY);
+        deltaRot = deltaRot % (2 * Math.PI);
+        if (deltaRot > Math.PI) deltaRot -= (2 * Math.PI);
+        if (deltaRot < -Math.PI) deltaRot += (2 * Math.PI);
+        entity.mesh.rotation.y = prevRotY + deltaRot * interpolationAlpha;
+
+        // OBB matrix updates (if still needed for client-side effects/debug)
+        if (entity.mesh.userData && entity.mesh.userData.obb) {
+            entity.mesh.updateMatrixWorld(true);
+            entity.mesh.userData.obb.matrix.copy(entity.mesh.matrixWorld);
+            for (const child of entity.mesh.children) {
                 if (child.name && child.name.endsWith("Zone") && child.userData.obb) {
-                    child.updateMatrixWorld(true); // Ensure child's matrix is also updated
+                    child.updateMatrixWorld(true);
                     child.userData.obb.matrix.copy(child.matrixWorld);
                 }
             }
         }
     }
 
-    // Client-side collision detection and handling should be removed or significantly simplified.
+    updateCamera(deltaTime); // Update camera after entities are interpolated
+
+    // Client-side collision detection and handling are removed.
     // Server will be authoritative.
     // const allCars = Object.values(gameEntities).filter(c => c);
     // for (const car of allCars) {
@@ -566,7 +662,7 @@ function animate() {
     //         }
     //     }
     // }
-    
+
     // Example: Iterating through gameEntities for potential rendering updates or client effects
     // for (const id_A in gameEntities) {
     //     const entity_A = gameEntities[id_A];
@@ -834,8 +930,8 @@ function updateScoreDisplay() {
 
     let playerCount = 0;
     for (const id in gameEntities) {
-        const entity = gameEntities[id];
-        if (entity && typeof entity.userData.score !== 'undefined') {
+        const entityData = gameEntities[id]; // Now an object { mesh, previousState, currentState, ... }
+        if (entityData && entityData.currentState && typeof entityData.currentState.score !== 'undefined') {
             let displayEl;
             if (id === myPlayerId && scoreCar1El) {
                 displayEl = scoreCar1El;
@@ -843,16 +939,16 @@ function updateScoreDisplay() {
                 displayEl = scoreCar2El;
             } else { // Dynamically add for others
                 displayEl = document.createElement('div');
-                displayEl.className = 'player-score-display'; // New class for dynamic scores
+                displayEl.className = 'player-score-display';
                 scoreboardDiv.appendChild(displayEl);
             }
-            if(displayEl) displayEl.textContent = `${entity.name}: ${entity.userData.score}`;
+            if(displayEl) displayEl.textContent = `${entityData.mesh.name}: ${entityData.currentState.score}`; // Use mesh.name and currentState.score
             playerCount++;
         }
     }
     // Hide car2 score if no second player shown in that slot
     if (playerCount < 2 && scoreCar2El) {
-         scoreCar2El.textContent = ""; // Or set display to none
+         scoreCar2El.textContent = "";
     }
 }
 
