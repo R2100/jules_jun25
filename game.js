@@ -509,17 +509,18 @@ function init() {
 }
 
 function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    if (camera && renderer) { // Ensure camera and renderer are initialized
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
 }
 
 
 function handlePlayerInput() {
     // This function now primarily sends input to the server.
-    // Client-side prediction could be added here later for smoother perceived movement.
-    if (!myPlayerId || !gameEntities[myPlayerId]) {
-        // console.warn("handlePlayerInput: No player ID or player entity yet.");
+    if (!myPlayerId || !gameEntities[myPlayerId] || !gameEntities[myPlayerId].mesh) {
+        // console.warn("handlePlayerInput: No player ID or player entity mesh yet.");
         return;
     }
 
@@ -531,9 +532,6 @@ function handlePlayerInput() {
         right: keysPressed['d'] || keysPressed['arrowright']
     };
     socket.emit('playerInput', inputPayload);
-
-    // The old direct manipulation of car1.userData.accelerationValue and turnValue is removed.
-    // Server will process input and send back game state.
 }
 
 function applyCarPhysics(car, dt) {
@@ -1072,45 +1070,6 @@ function applyCarPhysics00(car, dt) { // Moved definition to be grouped with oth
 }
 
 // --- PLAYER INPUT --- (Re-locating handlePlayerInput here)
-function handlePlayerInput() { // Moved definition
-    if (!car1 || !car2) return;
-
-    // Car 1 (Arrows)
-    if (keysPressed['arrowup']) {
-        car1.userData.accelerationValue = car1.userData.accelerationRate;
-    } else if (keysPressed['arrowdown']) {
-        car1.userData.accelerationValue = -car1.userData.accelerationRate;
-    } else {
-        car1.userData.accelerationValue = 0;
-    }
-
-    if (keysPressed['arrowleft']) {
-        car1.userData.turnValue = car1.userData.turnSpeed;
-    } else if (keysPressed['arrowright']) {
-        car1.userData.turnValue = -car1.userData.turnSpeed;
-    } else {
-        car1.userData.turnValue = 0;
-    }
-
-    // Car 2 (WASD)
-    if (keysPressed['w']) {
-        car2.userData.accelerationValue = car2.userData.accelerationRate;
-    } else if (keysPressed['s']) {
-        car2.userData.accelerationValue = -car2.userData.accelerationRate;
-    } else {
-        car2.userData.accelerationValue = 0;
-    }
-
-    if (keysPressed['a']) {
-        car2.userData.turnValue = car2.userData.turnSpeed;
-    } else if (keysPressed['d']) {
-        car2.userData.turnValue = -car2.userData.turnSpeed;
-    } else {
-        car2.userData.turnValue = 0;
-    }
-}
-
-
 // --- UI, CAMERA & VISUAL EFFECTS ---
 function updateCamera(dt) {
     const playerCar = gameEntities[myPlayerId];
